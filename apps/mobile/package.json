@@ -1,0 +1,39 @@
+{
+  "name": "@ai-cal/mobile",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo run:android",
+    "ios": "expo run:ios",
+    "web": "expo start --web",
+    "lint": "tsc --noEmit --pretty false",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "CI=1 bunx expo config --type public >/dev/null",
+    "check-all": "bun run lint && bun run typecheck && bun run test && bun run build",
+    "verify": "bun run typecheck && bun run test"
+  },
+  "dependencies": {
+    "expo": "^55.0.4",
+    "expo-image-manipulator": "^55.0.9",
+    "expo-image-picker": "^55.0.10",
+    "expo-router": "^55.0.3",
+    "expo-secure-store": "^55.0.8",
+    "nativewind": "^4.1.23",
+    "react": "19.2.4",
+    "react-dom": "19.2.0",
+    "react-native": "0.84.1",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "^4.24.0",
+    "react-native-svg": "15.15.3",
+    "react-native-web": "^0.21.0",
+    "zod": "^4.1.7"
+  },
+  "devDependencies": {
+    "@jridgewell/gen-mapping": "^0.3.13",
+    "@types/react": "~19.2.2",
+    "tailwindcss": "^3.4.17",
+    "typescript": "~5.9.3"
+  }
+}

@@ -1,0 +1,22 @@
+name = "ai-cal-api"
+main = "src/index.ts"
+compatibility_date = "2025-12-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+ENVIRONMENT = "production"
+BETTER_AUTH_URL = "https://ai-cal-api.moltbotclubbrasil.workers.dev"
+MEDIA_GC_ALERT_THRESHOLD = "25"
+
+[triggers]
+crons = ["*/15 * * * *"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-cal-db"
+database_id = "93169f6a-7b38-4f22-99c8-edd530c915e7"
+migrations_dir = "drizzle"
+
+# Secrets (set via wrangler secret put <NAME>):
+# GEMINI_API_KEY - Google Gemini API key
+# BETTER_AUTH_SECRET - better-auth session signing secret

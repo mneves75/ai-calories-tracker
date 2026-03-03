@@ -1,0 +1,55 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1772514755513,
+      "tag": "0000_productive_wolfsbane",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1772516400000,
+      "tag": "0001_analysis_events",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1772522800000,
+      "tag": "0002_auth_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1772524800000,
+      "tag": "0003_daily_summary_triggers",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1772528400000,
+      "tag": "0004_meal_idempotency_and_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1772532000000,
+      "tag": "0005_user_timezone",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1772532600000,
+      "tag": "0006_media_objects",
+      "breakpoints": true
+    }
+  ]
+}

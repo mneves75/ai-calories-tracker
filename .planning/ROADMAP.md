@@ -6,10 +6,10 @@ Quatro fases que entregam o MVP de um rastreador de calorias com IA: começa com
 
 ## Phases
 
-- [ ] **Phase 1: Backend Foundation** - API Hono no Cloudflare Workers com D1, schema, validação e secrets
-- [ ] **Phase 2: Auth + Onboarding** - Usuário pode criar conta, fazer login persistente e completar onboarding com meta calórica
-- [ ] **Phase 3: AI Core + Diário** - Usuário tira foto, recebe análise nutricional automática e gerencia refeições no diário
-- [ ] **Phase 4: Dashboard + Polish** - Dashboard visual com progresso calórico, UI pt-br completa e paywall mock
+- [x] **Phase 1: Backend Foundation** - API Hono no Cloudflare Workers com D1, schema, validação e secrets
+- [x] **Phase 2: Auth + Onboarding** - Usuário pode criar conta, fazer login persistente e completar onboarding com meta calórica
+- [x] **Phase 3: AI Core + Diário** - Usuário tira foto, recebe análise nutricional automática e gerencia refeições no diário
+- [x] **Phase 4: Dashboard + Polish** - Dashboard visual com progresso calórico, UI pt-br completa e paywall mock
 
 ## Phase Details
 
@@ -26,8 +26,8 @@ Quatro fases que entregam o MVP de um rastreador de calorias com IA: começa com
 **Plans**: TBD
 
 Plans:
-- [ ] 01-01: Monorepo setup, Hono worker, D1 schema com Drizzle e migrations
-- [ ] 01-02: Middleware Zod, rate limiting, wrangler secrets, testes de integração
+- [x] 01-01: Monorepo setup, Hono worker, D1 schema com Drizzle e migrations
+- [x] 01-02: Middleware Zod, rate limiting, wrangler secrets, testes de integração
 
 ### Phase 2: Auth + Onboarding
 **Goal**: Usuário pode criar conta, fazer login com sessão persistente e completar onboarding que calcula sua meta calórica diária
@@ -42,9 +42,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 02-01: better-auth no backend (rotas, middleware, isolamento por userId)
-- [ ] 02-02: Telas de login/registro no mobile com sessão persistente via SecureStore
-- [ ] 02-03: Fluxo de onboarding (UI moderna, cálculo Mifflin-St Jeor, save user_profiles)
+- [x] 02-01: better-auth no backend (rotas, middleware, isolamento por userId)
+- [x] 02-02: Telas de login/registro no mobile com sessão persistente via SecureStore
+- [x] 02-03: Fluxo de onboarding (UI moderna, cálculo Mifflin-St Jeor, save user_profiles)
 
 ### Phase 3: AI Core + Diário
 **Goal**: Usuário tira foto de uma refeição, recebe calorias e macros automaticamente via Gemini, e gerencia seu diário alimentar do dia
@@ -60,9 +60,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 03-01: Endpoint de análise AI (upload → Gemini 2.5 Flash → Zod validate → D1), rate limit 429 handler
-- [ ] 03-02: Tela de câmera/galeria, compressão de imagem, loading animado, tela de correção pós-scan
-- [ ] 03-03: Diário alimentar (tela do dia, agrupamento por categoria, delete, histórico 7 dias)
+- [x] 03-01: Endpoint de análise AI (upload → Gemini 2.5 Flash → Zod validate → D1), rate limit 429 handler
+- [x] 03-02: Tela de câmera/galeria, compressão de imagem, loading animado, tela de correção pós-scan
+- [x] 03-03: Diário alimentar (tela do dia, agrupamento por categoria, delete, histórico 7 dias)
 
 ### Phase 4: Dashboard + Polish
 **Goal**: Dashboard visual com progresso calórico do dia, interface completa em pt-br e paywall mock preparado para RevenueCat
@@ -77,9 +77,9 @@ Plans:
 **Plans**: TBD
 
 Plans:
-- [ ] 04-01: Dashboard (progress ring, macro breakdown, daily_summaries aggregation, timezone fix)
-- [ ] 04-02: UI polish (NativeWind v4, tabs navigation, error messages pt-br, max 3 toques para salvar refeição)
-- [ ] 04-03: Paywall mock (tela premium, useSubscription hook, feature gating preparado para RevenueCat)
+- [x] 04-01: Dashboard (progress ring, macro breakdown, daily_summaries aggregation, timezone fix)
+- [x] 04-02: UI polish (NativeWind v4, tabs navigation, error messages pt-br, max 3 toques para salvar refeição)
+- [x] 04-03: Paywall mock (tela premium, useSubscription hook, feature gating preparado para RevenueCat)
 
 ## Progress
 
@@ -87,7 +87,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Backend Foundation | 0/2 | Not started | - |
-| 2. Auth + Onboarding | 0/3 | Not started | - |
-| 3. AI Core + Diário | 0/3 | Not started | - |
-| 4. Dashboard + Polish | 0/3 | Not started | - |
+| 1. Backend Foundation | 2/2 | Done (local) | 2026-03-03 |
+| 2. Auth + Onboarding | 3/3 | Done (local) | 2026-03-03 |
+| 3. AI Core + Diário | 3/3 | Done (local) | 2026-03-03 |
+| 4. Dashboard + Polish | 3/3 | Done (local) | 2026-03-03 |

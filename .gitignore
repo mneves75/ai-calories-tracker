@@ -32,6 +32,7 @@ yarn-error.*
 
 # local env files
 .env*.local
+.dev.vars*
 
 # typescript
 *.tsbuildinfo
@@ -41,3 +42,15 @@ app-example
 # generated native folders
 /ios
 /android
+.firecrawl/
+
+# local agent/runtime state
+.cachebro/
+.omc/
+
+# wrangler local artifacts
+apps/api/.wrangler/
+apps/api/.wrangler-build/
+
+# verification evidence artifacts
+.planning/evidence/

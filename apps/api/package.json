@@ -1,0 +1,34 @@
+{
+  "name": "@ai-cal/api",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate:local": "wrangler d1 migrations apply ai-cal-db --local",
+    "db:migrate:remote": "wrangler d1 migrations apply ai-cal-db --remote",
+    "lint": "tsc --noEmit --pretty false",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "build": "wrangler deploy --dry-run --outdir .wrangler-build",
+    "smoke:local": "bash ./scripts/smoke-local.sh",
+    "check-all": "bun run lint && bun run typecheck && bun run test && bun run build && bun run smoke:local",
+    "verify": "bun run typecheck && bun run test",
+    "verify:production": "bash ./scripts/verify-production.sh",
+    "verify:production:loop": "bash ./scripts/verify-production-loop.sh"
+  },
+  "dependencies": {
+    "hono": "^4.12.0",
+    "drizzle-orm": "^0.45.0",
+    "zod": "^4.0.0",
+    "@hono/zod-validator": "^0.7.0",
+    "@google/generative-ai": "^0.24.0",
+    "better-auth": "^1.5.0"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0",
+    "@cloudflare/workers-types": "^4.0.0",
+    "drizzle-kit": "^0.31.0",
+    "typescript": "^5.9.0"
+  }
+}
