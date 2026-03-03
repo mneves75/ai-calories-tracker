@@ -96,11 +96,18 @@ export const mealIdempotencyKeys = sqliteTable('meal_idempotency_keys', {
   userId: text('user_id').notNull().references(() => users.id),
   idempotencyKey: text('idempotency_key').notNull(),
   requestHash: text('request_hash').notNull(),
+  state: text('state', { enum: ['in_progress', 'completed'] }).notNull().default('in_progress'),
+  responseStatus: integer('response_status'),
+  responseBody: text('response_body'),
   mealId: text('meal_id').references(() => meals.id),
   createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date()),
+  expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull().$defaultFn(() => new Date(Date.now() + 24 * 60 * 60 * 1000)),
 }, (table) => [
   uniqueIndex('meal_idempotency_user_key_idx').on(table.userId, table.idempotencyKey),
   index('meal_idempotency_created_at_idx').on(table.createdAt),
+  index('meal_idempotency_expires_at_idx').on(table.expiresAt),
+  index('meal_idempotency_state_updated_idx').on(table.state, table.updatedAt),
 ])
 
 export const dailySummaries = sqliteTable('daily_summaries', {
