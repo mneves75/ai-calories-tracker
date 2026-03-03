@@ -67,6 +67,7 @@ Evidências:
 - `.planning/evidence/verify-autonomous-20260303T191229Z.log`
 - `.planning/evidence/verify-autonomous-20260303T191554Z.log`
 - `.planning/evidence/verify-autonomous-20260303T233528Z.log`
+- `.planning/evidence/verify-autonomous-20260303T234517Z.log`
 
 ## Fases executadas nesta iteração ultrawork
 1. **Fase 1 — Timezone canônico**
@@ -87,9 +88,18 @@ Evidências:
 - smoke local automatizado com bootstrap de migrações D1;
 - workflows CI/deploy adicionados com deploy condicionado ao gate verde.
 
+## Fechamento de governança (GitHub)
+- Repositório remoto criado e publicado: `https://github.com/mneves75/ai-calories-tracker`.
+- Branch protection habilitada em `master` com:
+  - required status checks: `check-all` (`strict=true`);
+  - `enforce_admins=true`;
+  - `required_linear_history=true`;
+  - `required_conversation_resolution=true`;
+  - force-push e deletions desabilitados.
+- Validação prática: push direto em `master` foi bloqueado por política; alteração subsequente foi entregue via PR com check obrigatório verde.
+
 ## Riscos remanescentes (prioridade)
-1. Configuração de branch protection (required checks) depende do repositório remoto GitHub.
-2. Repositório local ainda sem `git remote`; sem isso não é possível automatizar proteção de branch por CLI.
+- Nenhum risco crítico aberto para o escopo deste plano.
 
 ## Critério de conclusão 100%
 A entrega só é considerada 100% quando:

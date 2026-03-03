@@ -1,6 +1,14 @@
 # Progress Log
 
 ## 2026-03-03
+- Fechamento de governança remota:
+  - repositório remoto criado: `https://github.com/mneves75/ai-calories-tracker`;
+  - branch protection aplicada em `master` com required check `check-all`, strict mode, admins enforced, linear history e conversation resolution;
+  - push direto em `master` bloqueado por política (comprovando enforcement);
+  - alteração final de CI entregue por PR `#1` com merge sob proteção;
+  - revalidação final após governança: `CYCLES=1 bun run verify:autonomous` aprovado;
+  - evidência final adicional: `.planning/evidence/verify-autonomous-20260303T234517Z.log`.
+
 - Fechamento autônomo final:
   - migração remota D1 inicialmente falhou em `0005_user_timezone.sql` por `ALTER TABLE ... DEFAULT (unixepoch() * 1000)` (não permitido em SQLite/D1);
   - correção aplicada na migração: default constante `0` + `UPDATE` de backfill para timestamp atual;
