@@ -17,6 +17,28 @@
 ### Resultado
 - Fases/tarefas do plano implementadas e validadas com loop autônomo multi-ciclo.
 
+## Fechamento de governança + revalidação (2026-03-03 23:45 UTC)
+
+### Critérios de aceite executados
+- Repositório GitHub configurado com proteção de branch no `master`.
+- Entrega de mudança sob branch protection validada por PR com check obrigatório.
+- Revalidação autônoma pós-governança sem regressão.
+
+### Execuções realizadas
+1. `gh repo create mneves75/ai-calories-tracker --private --source=. --remote=origin --push`
+2. `gh repo edit ... --visibility public --accept-visibility-change-consequences`
+3. Branch protection:
+   - `gh api ... /branches/master/protection` + ajuste de contexto obrigatório para `check-all`.
+4. Prova de enforcement:
+   - push direto em `master` rejeitado por proteção;
+   - PR `#1` criado (`ultrawork/deploy-manual`) e merge após check verde.
+5. `CYCLES=1 bun run verify:autonomous`
+   - sucesso fim-a-fim;
+   - evidência: `.planning/evidence/verify-autonomous-20260303T234517Z.log`.
+
+### Resultado
+- Escopo ultrawork concluído com verificação técnica + governança ativa no repositório remoto.
+
 ## Execução Ultrawork (2026-03-03)
 
 ### Critérios de aceite
