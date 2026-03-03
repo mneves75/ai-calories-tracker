@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Aplicativo mobile de rastreamento de calorias com reconhecimento de alimentos por foto usando IA (Gemini 3.0 Flash). O usuário tira uma foto ou seleciona da galeria, e o app identifica os alimentos e suas informações nutricionais automaticamente. Backend em Bun/Hono para deploy no Cloudflare Workers com banco D1.
+Aplicativo mobile de rastreamento de calorias com reconhecimento de alimentos por foto usando IA (Gemini 2.5 Flash). O usuário tira uma foto ou seleciona da galeria, e o app identifica os alimentos e suas informações nutricionais automaticamente. Backend em Bun/Hono para deploy no Cloudflare Workers com banco D1 e storage de imagens em R2.
 
 ## Core Value
 
@@ -16,7 +16,7 @@ O usuário consegue registrar uma refeição tirando uma foto e obtendo as calor
 
 ### Active
 
-- [ ] Reconhecimento de alimentos por foto via Gemini 3.0 Flash
+- [ ] Reconhecimento de alimentos por foto via Gemini 2.5 Flash
 - [ ] Captura de foto via câmera ou seleção da galeria
 - [ ] Cálculo automático de calorias e macronutrientes
 - [ ] Dashboard diário com resumo nutricional
@@ -42,7 +42,7 @@ O usuário consegue registrar uma refeição tirando uma foto e obtendo as calor
 - Backend serverless no Cloudflare Workers (Bun + Hono)
 - Banco de dados edge com Cloudflare D1 (SQLite distribuído)
 - Autenticação via better-auth (alternativa moderna ao NextAuth)
-- IA via Google Gemini 3.0 Flash (melhor custo-benefício para visão computacional)
+- IA via Google Gemini 2.5 Flash (estável para análise de imagens)
 - UI/UX precisa ser inovadora, moderna, com onboarding que engaja
 - Todo o app em português brasileiro (pt-br) com acentos
 - Preparado para monetização futura via RevenueCat
@@ -52,7 +52,7 @@ O usuário consegue registrar uma refeição tirando uma foto e obtendo as calor
 - **Tech Stack Backend**: Bun + Hono — deploy no Cloudflare Workers
 - **Database**: Cloudflare D1 — SQLite na edge
 - **Auth**: better-auth — obrigatório
-- **AI Model**: Gemini 3.0 Flash — reconhecimento de alimentos
+- **AI Model**: Gemini 2.5 Flash — reconhecimento de alimentos
 - **Idioma**: Português brasileiro (pt-br) em toda a interface
 - **Pagamentos**: Mock apenas — sem integração real no MVP
 - **Mobile**: React Native / Expo — padrão do desenvolvedor
@@ -61,7 +61,7 @@ O usuário consegue registrar uma refeição tirando uma foto e obtendo as calor
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| Gemini 3.0 Flash para visão | Melhor custo-benefício para análise de imagens de alimentos | — Pending |
+| Gemini 2.5 Flash para visão | Modelo suportado e estável para análise de imagens de alimentos | — Pending |
 | Cloudflare Workers + D1 | Edge computing, baixa latência, custo previsível | — Pending |
 | better-auth | Alternativa moderna, TypeScript-first, extensível | — Pending |
 | Mock de pagamentos | MVP foca na funcionalidade core, monetização depois | — Pending |

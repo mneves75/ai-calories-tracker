@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "AI Calories Tracker",
+    "slug": "ai-calories-tracker",
+    "scheme": "aicaloriestracker",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-image-picker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "ios": {
+      "bundleIdentifier": "com.mneves.ai-calories-tracker"
+    }
+  }
+}

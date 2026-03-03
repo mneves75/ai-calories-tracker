@@ -40,13 +40,13 @@ Requirements: INFRA-01 through INFRA-05.
 
 ### Secrets e Seguranca
 - Todos os secrets via `wrangler secret put` — zero no codigo-fonte
-- GEMINI_API_KEY, AUTH_SECRET como secrets obrigatorios
+- GEMINI_API_KEY, BETTER_AUTH_SECRET como secrets obrigatórios
 - Bindings D1 e R2 via wrangler.toml
 - Acesso a env via `c.env.VAR_NAME` (nunca `process.env`)
 
 ### Rate Limiting
 - Endpoint /api/meals/analyze: max 50 scans/dia por usuario
-- Implementar via Cloudflare KV como contador por userId+date
+- Implementar contador de análise por userId+date (no código atual via D1)
 - Retornar 429 com mensagem em pt-br quando exceder
 
 ### Gemini Integration
@@ -58,7 +58,7 @@ Requirements: INFRA-01 through INFRA-05.
 - Rejeitar e retornar erro amigavel se confianca < threshold
 
 ### Claude's Discretion
-- Implementacao exata do rate limiter (KV vs in-memory)
+- Implementação exata do rate limiter (D1 query vs outra estratégia persistente)
 - Estrutura interna do prompt Gemini (desde que retorne schema definido)
 - Estrategia de retry para 429 do Gemini (exponential backoff recomendado)
 - Naming conventions de rotas (kebab-case vs camelCase)
@@ -80,7 +80,7 @@ Requirements: INFRA-01 through INFRA-05.
 ## Existing Code Insights
 
 ### Reusable Assets
-- Nenhum codigo existente — projeto greenfield
+- Já existe base backend implementada (auth, users, meals, gemini) e em hardening
 
 ### Established Patterns
 - Bun como package manager e runtime (obrigatorio por CLAUDE.md)
@@ -88,7 +88,7 @@ Requirements: INFRA-01 through INFRA-05.
 - Soft delete pattern (deletedAt) obrigatorio por CLAUDE.md
 
 ### Integration Points
-- wrangler.toml configura bindings D1, R2, KV
+- wrangler.toml configura bindings D1 e R2
 - better-auth monta em /api/auth/* e gerencia suas proprias tabelas
 - Drizzle schema gera migrations para D1
 
