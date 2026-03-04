@@ -2,6 +2,7 @@ import type { Env } from '../types'
 
 const MEDIA_UPLOAD_TTL_MS = 24 * 60 * 60 * 1000
 const DEFAULT_GC_BATCH_SIZE = 100
+const DEFAULT_MEDIA_GC_ALERT_THRESHOLD = 25
 
 type MediaObjectRow = {
   id: string
@@ -31,6 +32,20 @@ function nowMs(now: Date | number | undefined) {
     return now
   }
   return Date.now()
+}
+
+function parseNonNegativeIntEnv(name: string, value: string | undefined, fallback: number) {
+  if (value == null) {
+    return fallback
+  }
+
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.error('INVALID_ENV_VALUE', { name, value, fallback })
+    return fallback
+  }
+
+  return Math.floor(parsed)
 }
 
 export async function registerUploadedMedia(
@@ -323,8 +338,13 @@ export async function runMediaGcCycle(
   const status = await getMediaGcStatus(env.DB, timestamp)
   metrics.pending = status.pending
 
-  const alertThreshold = Number(env.MEDIA_GC_ALERT_THRESHOLD ?? '25')
-  if (metrics.failed > 0 || (Number.isFinite(alertThreshold) && status.pending >= alertThreshold)) {
+  const alertThreshold = parseNonNegativeIntEnv(
+    'MEDIA_GC_ALERT_THRESHOLD',
+    env.MEDIA_GC_ALERT_THRESHOLD,
+    DEFAULT_MEDIA_GC_ALERT_THRESHOLD
+  )
+
+  if (metrics.failed > 0 || status.pending >= alertThreshold) {
     metrics.alert = true
     console.error('MEDIA_GC_ALERT', {
       failedInCycle: metrics.failed,

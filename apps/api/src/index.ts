@@ -5,10 +5,51 @@ import { authRoutes } from './routes/auth'
 import { mealRoutes } from './routes/meals'
 import { userRoutes } from './routes/users'
 import { getMediaGcStatus, runMediaGcCycle } from './services/media-gc'
-import { purgeExpiredMealIdempotencyKeys } from './services/idempotency-gc'
+import { getIdempotencyHealthStatus, purgeExpiredMealIdempotencyKeys } from './services/idempotency-gc'
 import type { Env } from './types'
 
 const app = new Hono<{ Bindings: Env }>()
+const DEFAULT_MEDIA_GC_STATUS = { pending: 0, failed: 0 }
+const DEFAULT_IDEMPOTENCY_STATUS = {
+  inProgress: 0,
+  staleInProgress: 0,
+  completedNotExpired: 0,
+  expired: 0,
+}
+const DEFAULT_IDEMPOTENCY_STALE_MS = 2 * 60 * 1000
+const DEFAULT_IDEMPOTENCY_ALERT_THRESHOLD = 25
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function parseNonNegativeIntEnv(name: string, value: string | undefined, fallback: number) {
+  if (value == null) {
+    return fallback
+  }
+
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    console.error('INVALID_ENV_VALUE', { name, value, fallback })
+    return fallback
+  }
+
+  return Math.floor(parsed)
+}
+
+function parsePositiveIntEnv(name: string, value: string | undefined, fallback: number) {
+  if (value == null) {
+    return fallback
+  }
+
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    console.error('INVALID_ENV_VALUE', { name, value, fallback })
+    return fallback
+  }
+
+  return Math.floor(parsed)
+}
 
 // Global middleware
 app.use('*', logger())
@@ -34,17 +75,37 @@ app.use('*', cors({
 
 // Health check
 app.get('/health', async (c) => {
-  let gcStatus = { pending: 0, failed: 0 }
+  let status: 'ok' | 'degraded' = 'ok'
+  const checks = {
+    mediaGc: 'ok' as 'ok' | 'error',
+    idempotency: 'ok' as 'ok' | 'error',
+  }
+  let gcStatus = DEFAULT_MEDIA_GC_STATUS
+  let idempotency = DEFAULT_IDEMPOTENCY_STATUS
+
   try {
     gcStatus = await getMediaGcStatus(c.env.DB)
-  } catch {
-    // Keep health endpoint available during migration rollout window.
+  } catch (error) {
+    status = 'degraded'
+    checks.mediaGc = 'error'
+    console.error('HEALTH_CHECK_FAILED', { check: 'mediaGc', error: errorMessage(error) })
   }
+
+  try {
+    idempotency = await getIdempotencyHealthStatus(c.env.DB)
+  } catch (error) {
+    status = 'degraded'
+    checks.idempotency = 'error'
+    console.error('HEALTH_CHECK_FAILED', { check: 'idempotency', error: errorMessage(error) })
+  }
+
   return c.json({
-    status: 'ok',
+    status,
     timestamp: new Date().toISOString(),
+    checks,
     mediaGc: gcStatus,
-  })
+    idempotency,
+  }, status === 'ok' ? 200 : 503)
 })
 
 // Mount routes
@@ -74,11 +135,65 @@ export default {
   fetch: app.fetch,
   scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil((async () => {
+      let idempotencyMaintOk = false
+      let mediaGcOk = false
+
+      const staleInProgressMs = parsePositiveIntEnv(
+        'IDEMPOTENCY_IN_PROGRESS_STALE_MS',
+        env.IDEMPOTENCY_IN_PROGRESS_STALE_MS,
+        DEFAULT_IDEMPOTENCY_STALE_MS
+      )
+      const inProgressAlertThreshold = parseNonNegativeIntEnv(
+        'IDEMPOTENCY_IN_PROGRESS_ALERT_THRESHOLD',
+        env.IDEMPOTENCY_IN_PROGRESS_ALERT_THRESHOLD,
+        DEFAULT_IDEMPOTENCY_ALERT_THRESHOLD
+      )
+
       try {
-        await purgeExpiredMealIdempotencyKeys(env.DB)
-        await runMediaGcCycle(env)
+        const removed = await purgeExpiredMealIdempotencyKeys(env.DB)
+        const status = await getIdempotencyHealthStatus(
+          env.DB,
+          Date.now(),
+          staleInProgressMs
+        )
+        idempotencyMaintOk = true
+        const shouldAlert = (
+          status.staleInProgress > 0
+          || status.inProgress >= inProgressAlertThreshold
+        )
+
+        if (shouldAlert) {
+          console.error('IDEMPOTENCY_ALERT', {
+            removedExpired: removed,
+            inProgress: status.inProgress,
+            staleInProgress: status.staleInProgress,
+            completedNotExpired: status.completedNotExpired,
+            expired: status.expired,
+            inProgressAlertThreshold,
+          })
+        }
       } catch (error) {
-        console.error('Falha no ciclo de manutenção agendada', error)
+        console.error('MAINTENANCE_TASK_FAILED', {
+          task: 'idempotency',
+          error: errorMessage(error),
+        })
+      }
+
+      try {
+        await runMediaGcCycle(env)
+        mediaGcOk = true
+      } catch (error) {
+        console.error('MAINTENANCE_TASK_FAILED', {
+          task: 'mediaGc',
+          error: errorMessage(error),
+        })
+      }
+
+      if (!idempotencyMaintOk || !mediaGcOk) {
+        console.error('MAINTENANCE_CYCLE_PARTIAL_FAILURE', {
+          idempotencyMaintOk,
+          mediaGcOk,
+        })
       }
     })())
   },
