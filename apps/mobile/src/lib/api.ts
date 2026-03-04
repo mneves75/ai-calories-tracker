@@ -18,6 +18,11 @@ type RequestOptions = {
 }
 
 export type ApiErrorBody = {
+  type?: string
+  title?: string
+  status?: number
+  detail?: string
+  instance?: string
   error?: string
   message?: string
   mensagem?: string
@@ -139,6 +144,12 @@ function translateKnownApiError(
       case 'MEDIA_TOKEN_INVALID':
       case 'MEDIA_NOT_AVAILABLE':
         return 'A imagem selecionada expirou. Faça uma nova análise para continuar.'
+      case 'IDEMPOTENCY_KEY_REQUIRED':
+      case 'IDEMPOTENCY_KEY_CONFLICT':
+      case 'IDEMPOTENCY_KEY_IN_PROGRESS':
+      case 'IDEMPOTENCY_KEY_STALE':
+      case 'IDEMPOTENCY_KEY_RESERVATION_FAILED':
+        return 'Não foi possível concluir o salvamento agora. Tente novamente em alguns segundos.'
       default:
         break
     }
@@ -245,7 +256,11 @@ export function mapApiErrorMessage(status: number, body: ApiErrorBody | null) {
     return detailMessage
   }
 
-  const normalized = translateKnownApiError(body?.mensagem ?? body?.error ?? body?.message, body?.code, status)
+  const normalized = translateKnownApiError(
+    body?.detail ?? body?.mensagem ?? body?.error ?? body?.message ?? body?.title,
+    body?.code,
+    status
+  )
   if (normalized) {
     return normalized
   }

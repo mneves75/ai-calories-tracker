@@ -7,6 +7,7 @@ import { authMiddleware } from '../middleware/auth'
 import { jsonValidator, queryValidator, paramValidator } from '../middleware/validate'
 import { analyzeFood } from '../services/gemini'
 import { getDateForTimezone } from '../lib/timezone'
+import { problem } from '../lib/problem'
 import {
   attachMediaToMeal,
   markMealMediaForDeletion,
@@ -29,7 +30,10 @@ const MAX_ANALYZE_IMAGE_BYTES = 2 * 1024 * 1024
 const ANALYZE_TIMEOUT_MS = 15_000
 const ANALYZE_TIMEOUT_ERROR = 'AI_ANALYSIS_TIMEOUT'
 const IDEMPOTENCY_KEY_HEADER = 'idempotency-key'
+const IDEMPOTENCY_REPLAYED_HEADER = 'idempotency-replayed'
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/
+const IDEMPOTENCY_TTL_MS = 24 * 60 * 60 * 1000
+const IDEMPOTENCY_RETRY_AFTER_SECONDS = 2
 
 type AnalyzeImagePayload = {
   normalizedBase64: string
@@ -62,6 +66,9 @@ type MealSelectRow = {
 
 type MealIdempotencyRow = {
   requestHash: string
+  state: 'in_progress' | 'completed'
+  responseStatus: number | null
+  responseBody: string | null
   mealId: string | null
 }
 
@@ -343,8 +350,19 @@ async function resolveManualIdempotency(
   idempotencyKey: string,
   requestHash: string
 ) {
+  const now = Date.now()
+  await c.env.DB.prepare(`
+    DELETE FROM meal_idempotency_keys
+    WHERE user_id = ? AND idempotency_key = ? AND expires_at > 0 AND expires_at <= ?
+  `).bind(userId, idempotencyKey, now).run()
+
   const existing = await c.env.DB.prepare(`
-    SELECT request_hash AS requestHash, meal_id AS mealId
+    SELECT
+      request_hash AS requestHash,
+      state,
+      response_status AS responseStatus,
+      response_body AS responseBody,
+      meal_id AS mealId
     FROM meal_idempotency_keys
     WHERE user_id = ? AND idempotency_key = ?
     LIMIT 1
@@ -355,37 +373,66 @@ async function resolveManualIdempotency(
   }
 
   if (existing.requestHash !== requestHash) {
-    return c.json(
-      {
-        error: 'Idempotency-Key reutilizada com payload diferente',
-        code: 'IDEMPOTENCY_KEY_CONFLICT',
-      },
-      409
-    )
+    return problem(c, {
+      type: 'https://docs.stripe.com/api/idempotent_requests',
+      title: 'Idempotency-Key conflict',
+      status: 422,
+      detail: 'Idempotency-Key reutilizada com payload diferente',
+      code: 'IDEMPOTENCY_KEY_CONFLICT',
+    })
+  }
+
+  if (existing.state === 'in_progress') {
+    c.header('Retry-After', String(IDEMPOTENCY_RETRY_AFTER_SECONDS))
+    return problem(c, {
+      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+      title: 'Idempotent request still in progress',
+      status: 409,
+      detail: 'Requisição idempotente em processamento. Tente novamente em instantes.',
+      code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+    })
+  }
+
+  if (existing.responseStatus && existing.responseBody) {
+    let parsedBody: unknown
+    try {
+      parsedBody = JSON.parse(existing.responseBody)
+    } catch {
+      parsedBody = null
+    }
+
+    if (parsedBody !== null) {
+      const replayStatus: 200 | 201 = existing.responseStatus === 200 ? 200 : 201
+      c.header('Idempotency-Key', idempotencyKey)
+      c.header(IDEMPOTENCY_REPLAYED_HEADER, 'true')
+      return c.json(parsedBody, replayStatus)
+    }
   }
 
   if (!existing.mealId) {
-    return c.json(
-      {
-        error: 'Requisição idempotente em processamento. Tente novamente em instantes.',
-        code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
-      },
-      409
-    )
+    return problem(c, {
+      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+      title: 'Idempotency record is inconsistent',
+      status: 409,
+      detail: 'Requisição idempotente inconsistente. Reenvie com uma nova chave.',
+      code: 'IDEMPOTENCY_KEY_STALE',
+    })
   }
 
   const meal = await findMealById(c.env.DB, userId, existing.mealId)
   if (!meal) {
-    return c.json(
-      {
-        error: 'Requisição idempotente inconsistente. Reenvie com uma nova chave.',
-        code: 'IDEMPOTENCY_KEY_STALE',
-      },
-      409
-    )
+    return problem(c, {
+      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+      title: 'Idempotency record is stale',
+      status: 409,
+      detail: 'Requisição idempotente inconsistente. Reenvie com uma nova chave.',
+      code: 'IDEMPOTENCY_KEY_STALE',
+    })
   }
 
-  return c.json({ meal, replayed: true }, 200)
+  c.header('Idempotency-Key', idempotencyKey)
+  c.header(IDEMPOTENCY_REPLAYED_HEADER, 'true')
+  return c.json({ meal }, 201)
 }
 
 // All routes require auth
@@ -568,13 +615,13 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
 
   const idempotencyKey = normalizeIdempotencyKey(c.req.header(IDEMPOTENCY_KEY_HEADER))
   if (!idempotencyKey) {
-    return c.json(
-      {
-        error: 'Cabeçalho Idempotency-Key obrigatório e inválido',
-        code: 'IDEMPOTENCY_KEY_REQUIRED',
-      },
-      400
-    )
+    return problem(c, {
+      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+      title: 'Missing or invalid Idempotency-Key',
+      status: 400,
+      detail: 'Cabeçalho Idempotency-Key obrigatório e inválido',
+      code: 'IDEMPOTENCY_KEY_REQUIRED',
+    })
   }
 
   const requestHash = await sha256Hex(buildManualPayloadHashInput(userId, data))
@@ -584,21 +631,34 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
   }
 
   const reservation = await c.env.DB.prepare(`
-    INSERT INTO meal_idempotency_keys (id, user_id, idempotency_key, request_hash, created_at)
-    SELECT ?, ?, ?, ?, ?
+    INSERT INTO meal_idempotency_keys (
+      id,
+      user_id,
+      idempotency_key,
+      request_hash,
+      state,
+      created_at,
+      updated_at,
+      expires_at
+    )
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?
     WHERE NOT EXISTS (
       SELECT 1
       FROM meal_idempotency_keys
-      WHERE user_id = ? AND idempotency_key = ?
+      WHERE user_id = ? AND idempotency_key = ? AND expires_at > ?
     )
   `).bind(
     crypto.randomUUID(),
     userId,
     idempotencyKey,
     requestHash,
+    'in_progress',
     Date.now(),
+    Date.now(),
+    Date.now() + IDEMPOTENCY_TTL_MS,
     userId,
-    idempotencyKey
+    idempotencyKey,
+    Date.now()
   ).run()
 
   if (Number(reservation.meta?.changes ?? 0) === 0) {
@@ -607,13 +667,14 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
       return racedResponse
     }
 
-    return c.json(
-      {
-        error: 'Não foi possível reservar a chave de idempotência',
-        code: 'IDEMPOTENCY_KEY_RESERVATION_FAILED',
-      },
-      409
-    )
+    c.header('Retry-After', String(IDEMPOTENCY_RETRY_AFTER_SECONDS))
+    return problem(c, {
+      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+      title: 'Idempotency reservation failed',
+      status: 409,
+      detail: 'Não foi possível reservar a chave de idempotência',
+      code: 'IDEMPOTENCY_KEY_RESERVATION_FAILED',
+    })
   }
 
   const mealId = crypto.randomUUID()
@@ -666,18 +727,32 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
       }
     }
 
-    await c.env.DB.prepare(`
-      UPDATE meal_idempotency_keys
-      SET meal_id = ?
-      WHERE user_id = ? AND idempotency_key = ? AND request_hash = ?
-    `).bind(mealId, userId, idempotencyKey, requestHash).run()
-
     const meal = await findMealById(c.env.DB, userId, mealId)
     if (!meal) {
       throw new Error('Refeição criada, mas não encontrada na leitura de confirmação')
     }
 
-    return c.json({ meal }, 201)
+    const successPayload = { meal }
+    await c.env.DB.prepare(`
+      UPDATE meal_idempotency_keys
+      SET
+        meal_id = ?,
+        state = 'completed',
+        response_status = 201,
+        response_body = ?,
+        updated_at = ?
+      WHERE user_id = ? AND idempotency_key = ? AND request_hash = ?
+    `).bind(
+      mealId,
+      JSON.stringify(successPayload),
+      Date.now(),
+      userId,
+      idempotencyKey,
+      requestHash
+    ).run()
+
+    c.header('Idempotency-Key', idempotencyKey)
+    return c.json(successPayload, 201)
   } catch (error) {
     if (mealInserted) {
       await c.env.DB.prepare(`
@@ -688,7 +763,7 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
 
     await c.env.DB.prepare(`
       DELETE FROM meal_idempotency_keys
-      WHERE user_id = ? AND idempotency_key = ? AND meal_id IS NULL
+      WHERE user_id = ? AND idempotency_key = ? AND state = 'in_progress'
     `).bind(userId, idempotencyKey).run()
 
     throw error

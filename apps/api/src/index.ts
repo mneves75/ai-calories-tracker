@@ -5,6 +5,7 @@ import { authRoutes } from './routes/auth'
 import { mealRoutes } from './routes/meals'
 import { userRoutes } from './routes/users'
 import { getMediaGcStatus, runMediaGcCycle } from './services/media-gc'
+import { purgeExpiredMealIdempotencyKeys } from './services/idempotency-gc'
 import type { Env } from './types'
 
 const app = new Hono<{ Bindings: Env }>()
@@ -74,9 +75,10 @@ export default {
   scheduled: async (_event: ScheduledEvent, env: Env, ctx: ExecutionContext) => {
     ctx.waitUntil((async () => {
       try {
+        await purgeExpiredMealIdempotencyKeys(env.DB)
         await runMediaGcCycle(env)
       } catch (error) {
-        console.error('Falha no ciclo de GC de mídia', error)
+        console.error('Falha no ciclo de manutenção agendada', error)
       }
     })())
   },

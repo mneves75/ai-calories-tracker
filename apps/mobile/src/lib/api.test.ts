@@ -38,6 +38,15 @@ describe('api error mapping', () => {
 
     expect(message).toBe('Dados inválidos. Revise os campos.')
   })
+
+  it('traduz erros de idempotência para mensagem segura', () => {
+    const message = mapApiErrorMessage(409, {
+      code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+      error: 'Idempotent request still in progress',
+    })
+
+    expect(message).toBe('Não foi possível concluir o salvamento agora. Tente novamente em alguns segundos.')
+  })
 })
 
 describe('session invalid detection', () => {

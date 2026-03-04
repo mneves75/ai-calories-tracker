@@ -1,6 +1,17 @@
 # Progress Log
 
 ## 2026-03-03
+- Atualização elegante v2 (baseada em padrão de mercado):
+  - idempotência de `/api/meals/manual` evoluída para modelo stateful (`in_progress`/`completed`) com replay exato de status/body e header `Idempotency-Replayed`;
+  - conflito de payload idempotente ajustado para `422` com envelope `application/problem+json` (RFC 9457);
+  - adicionada expiração de chave idempotente (TTL 24h) com colunas `response_status/response_body/expires_at` (migração `0007`);
+  - incluído GC de idempotência expiradas no `scheduled` handler;
+  - compatibilidade de UX no mobile mantida por mapeamento de novos códigos de erro.
+- Verificação v2:
+  - `bun run check-all` aprovado;
+  - `CYCLES=2 bun run verify:autonomous` aprovado;
+  - evidência: `.planning/evidence/verify-autonomous-20260303T235718Z.log`.
+
 - Fechamento de governança remota:
   - repositório remoto criado: `https://github.com/mneves75/ai-calories-tracker`;
   - branch protection aplicada em `master` com required check `check-all`, strict mode, admins enforced, linear history e conversation resolution;

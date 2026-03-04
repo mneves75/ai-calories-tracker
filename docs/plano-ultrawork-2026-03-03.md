@@ -8,6 +8,7 @@ Elevar a implementação para padrão de mercado com foco em correção, idempot
 - Semântica temporal consistente por `localDate` no fluxo de análise.
 - Hardening de API e cliente com defaults fail-closed.
 - Regressões automatizadas para blindar os riscos críticos.
+- Contrato de erro padronizado por `application/problem+json` (RFC 9457) para fluxos críticos.
 
 Referências:
 - IETF draft `Idempotency-Key`: https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header
@@ -16,10 +17,29 @@ Referências:
 
 ## O que foi implementado
 
+### Atualização Elegante v2 (Carmack-grade)
+1. `POST /api/meals/manual` evoluído para **idempotência stateful**:
+- estados `in_progress`/`completed`;
+- replay exato de status/body original;
+- `Idempotency-Replayed: true` em replay;
+- conflito de payload com `422` (`problem+json`);
+- `Retry-After` para requisição em progresso.
+
+2. Persistência de idempotência reforçada:
+- migração `0007_idempotency_response_replay.sql`;
+- colunas `state`, `response_status`, `response_body`, `updated_at`, `expires_at`;
+- TTL de 24h para chaves de idempotência.
+
+3. Manutenção agendada:
+- novo GC de idempotência expiradas no `scheduled` handler (`purgeExpiredMealIdempotencyKeys`).
+
+4. Contrato de erro alinhado a padrão:
+- helper `problem()` com `application/problem+json` + campos legados para compatibilidade do app mobile.
+
 ### Backend (API)
 1. `POST /api/meals/manual` agora exige `Idempotency-Key`:
 - replay consistente para mesma chave + mesmo payload;
-- `409` para mesma chave + payload diferente;
+- `422` para mesma chave + payload diferente (problema semântico);
 - reserva/commit de chave com persistência em D1.
 
 2. `/api/meals/analyze` passou a usar `localDate` do cliente (com fallback seguro):
@@ -68,6 +88,7 @@ Evidências:
 - `.planning/evidence/verify-autonomous-20260303T191554Z.log`
 - `.planning/evidence/verify-autonomous-20260303T233528Z.log`
 - `.planning/evidence/verify-autonomous-20260303T234517Z.log`
+- `.planning/evidence/verify-autonomous-20260303T235718Z.log`
 
 ## Fases executadas nesta iteração ultrawork
 1. **Fase 1 — Timezone canônico**
