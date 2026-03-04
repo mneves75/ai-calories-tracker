@@ -1,5 +1,35 @@
 # Progress Log
 
+## 2026-03-04
+- Atualização elegante v3 (operability hardening orientado por padrão de mercado):
+  - `/health` agora reporta degradado de forma explícita e verificável:
+    - checks independentes para `mediaGc` e `idempotency`;
+    - `status: degraded` + HTTP `503` quando qualquer check falha.
+  - `scheduled` desacoplado por tarefa:
+    - falha em idempotência não bloqueia execução de media GC;
+    - logs estruturados por tarefa (`MAINTENANCE_TASK_FAILED`) + resumo de ciclo parcial.
+  - parsing de env fortalecido (fail-safe):
+    - `IDEMPOTENCY_IN_PROGRESS_STALE_MS` e `IDEMPOTENCY_IN_PROGRESS_ALERT_THRESHOLD`;
+    - `MEDIA_GC_ALERT_THRESHOLD` com fallback seguro e log `INVALID_ENV_VALUE`.
+  - robustez de agregação idempotente:
+    - normalização de `staleInProgressMs` inválido;
+    - coerção de contadores inválidos/nulos para `0`.
+- Regressões adicionais:
+  - `apps/api/src/index.test.ts` expandido para:
+    - `/health` degradado (`503`) com checks de erro;
+    - isolamento de tarefas no `scheduled`;
+    - emissão de `IDEMPOTENCY_ALERT`;
+    - fallback seguro para env inválida.
+  - `apps/api/src/services/idempotency-gc.test.ts` expandido para:
+    - `meta.changes` ausente;
+    - `staleInProgressMs` inválido com fallback seguro;
+    - coerção de campos inválidos para `0`.
+- Verificação executada:
+  - `bun test apps/api/src/index.test.ts apps/api/src/services/idempotency-gc.test.ts apps/api/src/services/media-gc.test.ts` ✅
+  - `bun run check-all` ✅
+  - `CYCLES=2 bun run verify:autonomous` ✅
+  - evidência: `.planning/evidence/verify-autonomous-20260304T001253Z.log`
+
 ## 2026-03-03
 - Atualização elegante v2 (baseada em padrão de mercado):
   - idempotência de `/api/meals/manual` evoluída para modelo stateful (`in_progress`/`completed`) com replay exato de status/body e header `Idempotency-Replayed`;

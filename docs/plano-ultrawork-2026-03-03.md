@@ -36,6 +36,24 @@ Referências:
 4. Contrato de erro alinhado a padrão:
 - helper `problem()` com `application/problem+json` + campos legados para compatibilidade do app mobile.
 
+### Atualização Elegante v3 (operability hardening)
+1. `/health` com semântica operacional explícita:
+- checks independentes para `mediaGc` e `idempotency`;
+- estado degradado agora retorna `503` com payload estruturado de checks.
+
+2. `scheduled` desacoplado por tarefa:
+- manutenção de idempotência e media GC executadas de forma independente;
+- falhas pontuais não interrompem o ciclo inteiro;
+- logs estruturados por tarefa para diagnóstico (`MAINTENANCE_TASK_FAILED`, `MAINTENANCE_CYCLE_PARTIAL_FAILURE`).
+
+3. Parsing de env robusto/fail-safe:
+- thresholds inválidos agora usam fallback seguro com log explícito (`INVALID_ENV_VALUE`);
+- aplicado em idempotência e media GC.
+
+4. Robustez de agregação idempotente:
+- normalização de janela `staleInProgressMs` inválida;
+- coerção de contadores inválidos/nulos para `0`.
+
 ### Backend (API)
 1. `POST /api/meals/manual` agora exige `Idempotency-Key`:
 - replay consistente para mesma chave + mesmo payload;
@@ -89,6 +107,7 @@ Evidências:
 - `.planning/evidence/verify-autonomous-20260303T233528Z.log`
 - `.planning/evidence/verify-autonomous-20260303T234517Z.log`
 - `.planning/evidence/verify-autonomous-20260303T235718Z.log`
+- `.planning/evidence/verify-autonomous-20260304T001253Z.log`
 
 ## Fases executadas nesta iteração ultrawork
 1. **Fase 1 — Timezone canônico**
