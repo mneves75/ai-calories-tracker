@@ -7,4 +7,6 @@ export type Env = {
   ENVIRONMENT: 'local' | 'development' | 'test' | 'staging' | 'production'
   MAINTENANCE_TOKEN?: string
   MEDIA_GC_ALERT_THRESHOLD?: string
+  IDEMPOTENCY_IN_PROGRESS_ALERT_THRESHOLD?: string
+  IDEMPOTENCY_IN_PROGRESS_STALE_MS?: string
 }

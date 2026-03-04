@@ -1,5 +1,26 @@
 # Plano de Verificação (Executado)
 
+## Atualização elegante v3 (2026-03-04 00:12 UTC)
+
+### Critérios de aceite executados
+- Health reporta estado degradado com semântica operacional explícita (`503`) quando checks internos falham.
+- Manutenção agendada executa idempotência e media GC de forma isolada (sem bloqueio em cascata).
+- Parsing de env inválida não degrada silenciosamente thresholds (fallback seguro + log explícito).
+- Regressões de idempotência cobrem caminhos de valores nulos/inválidos.
+
+### Execuções realizadas
+1. `bun test apps/api/src/index.test.ts apps/api/src/services/idempotency-gc.test.ts apps/api/src/services/media-gc.test.ts`
+   - `13` testes, `0` falhas.
+2. `bun run check-all`
+   - passou (lint + verify + build + smoke local).
+3. `CYCLES=2 bun run verify:autonomous`
+   - local: API `52/52`, mobile `21/21`;
+   - produção: 2 ciclos consecutivos aprovados com `401/429/Retry-After`, smoke completo e `analyze` `200`.
+   - evidência: `.planning/evidence/verify-autonomous-20260304T001253Z.log`.
+
+### Resultado
+- Versão v3 consolidada e validada fim-a-fim em gate local + gate de produção.
+
 ## Atualização elegante v2 (2026-03-03 23:57 UTC)
 
 ### Critérios de aceite executados
