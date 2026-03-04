@@ -50,7 +50,13 @@ type MockDbOptions = {
   rateInsertChanges?: number
   idempotencyInsertChanges?: number
   userTimezone?: string | null
-  existingIdempotency?: { requestHash: string; mealId: string | null }
+  existingIdempotency?: {
+    requestHash: string
+    mealId: string | null
+    state?: 'in_progress' | 'completed'
+    responseStatus?: number | null
+    responseBody?: string | null
+  }
   existingMediaObject?: {
     id: string
     userId: string
@@ -108,7 +114,16 @@ function createMockD1(options: MockDbOptions = {}): { db: D1Database; logs: Quer
               }
 
               if (normalizedSql.includes('from meal_idempotency_keys')) {
-                return (options.existingIdempotency ?? null) as T
+                if (!options.existingIdempotency) {
+                  return null as T
+                }
+                return {
+                  requestHash: options.existingIdempotency.requestHash,
+                  mealId: options.existingIdempotency.mealId,
+                  state: options.existingIdempotency.state ?? (options.existingIdempotency.mealId ? 'completed' : 'in_progress'),
+                  responseStatus: options.existingIdempotency.responseStatus ?? null,
+                  responseBody: options.existingIdempotency.responseBody ?? null,
+                } as T
               }
 
               if (normalizedSql.includes('select id, local_date') && normalizedSql.includes('from meals') && options.mealToDelete) {
@@ -125,7 +140,28 @@ function createMockD1(options: MockDbOptions = {}): { db: D1Database; logs: Quer
                 normalizedSql.includes('userid') &&
                 normalizedSql.includes('mealtype')
               ) {
-                return (options.mealById ?? null) as T
+                if (options.mealById) {
+                  return options.mealById as T
+                }
+                const [mealId, userId] = params as [string, string]
+                return {
+                  id: mealId,
+                  userId,
+                  imageKey: null,
+                  mealType: 'lunch',
+                  name: 'Arroz e frango',
+                  calories: 540,
+                  protein: 42,
+                  carbs: 53,
+                  fat: 16,
+                  foodsDetected: null,
+                  aiConfidence: null,
+                  isManualEntry: 1,
+                  localDate: '2026-03-03',
+                  loggedAt: '2026-03-03T12:00:00.000Z',
+                  createdAt: Date.now(),
+                  deletedAt: null,
+                } as T
               }
 
               if (normalizedSql.includes('coalesce(sum(calories)')) {
@@ -366,7 +402,7 @@ describe('mealRoutes regressions', () => {
     expect(body.code).toBe('IDEMPOTENCY_KEY_REQUIRED')
   })
 
-  it('retorna 409 quando Idempotency-Key é reutilizada com payload diferente', async () => {
+  it('retorna 422 problem+json quando Idempotency-Key é reutilizada com payload diferente', async () => {
     const app = createApp()
     const { env } = createEnv({
       existingIdempotency: {
@@ -398,11 +434,12 @@ describe('mealRoutes regressions', () => {
     )
 
     const body = await response.json() as { code: string }
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(422)
+    expect(response.headers.get('content-type')).toContain('application/problem+json')
     expect(body.code).toBe('IDEMPOTENCY_KEY_CONFLICT')
   })
 
-  it('retorna replay quando Idempotency-Key e payload já foram processados', async () => {
+  it('retorna replay com mesmo status/body quando Idempotency-Key e payload já foram processados', async () => {
     const app = createApp()
     const payload = {
       name: 'Arroz e frango',
@@ -421,24 +458,28 @@ describe('mealRoutes regressions', () => {
       existingIdempotency: {
         requestHash,
         mealId: replayMealId,
-      },
-      mealById: {
-        id: replayMealId,
-        userId: TEST_USER.id,
-        imageKey: null,
-        mealType: payload.mealType,
-        name: payload.name,
-        calories: payload.calories,
-        protein: payload.protein,
-        carbs: payload.carbs,
-        fat: payload.fat,
-        foodsDetected: null,
-        aiConfidence: null,
-        isManualEntry: 1,
-        localDate: payload.localDate,
-        loggedAt: '2026-03-03T12:00:00.000Z',
-        createdAt: Date.now(),
-        deletedAt: null,
+        state: 'completed',
+        responseStatus: 201,
+        responseBody: JSON.stringify({
+          meal: {
+            id: replayMealId,
+            userId: TEST_USER.id,
+            imageKey: null,
+            mealType: payload.mealType,
+            name: payload.name,
+            calories: payload.calories,
+            protein: payload.protein,
+            carbs: payload.carbs,
+            fat: payload.fat,
+            foodsDetected: null,
+            aiConfidence: null,
+            isManualEntry: true,
+            localDate: payload.localDate,
+            loggedAt: '2026-03-03T12:00:00.000Z',
+            createdAt: Date.now(),
+            deletedAt: null,
+          },
+        }),
       },
     })
 
@@ -455,13 +496,84 @@ describe('mealRoutes regressions', () => {
       env
     )
 
-    const body = await response.json() as { replayed: boolean; meal: { id: string } }
+    const body = await response.json() as { meal: { id: string } }
     const insertMealLog = logs.find((entry) => entry.sql.toLowerCase().includes('insert into meals'))
 
-    expect(response.status).toBe(200)
-    expect(body.replayed).toBe(true)
+    expect(response.status).toBe(201)
     expect(body.meal.id).toBe(replayMealId)
+    expect(response.headers.get('idempotency-replayed')).toBe('true')
     expect(insertMealLog).toBeUndefined()
+  })
+
+  it('retorna 201 e ecoa Idempotency-Key em criação manual bem-sucedida', async () => {
+    const app = createApp()
+    const { env } = createEnv()
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'meal-created-1234',
+        },
+        body: JSON.stringify({
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 540,
+          protein: 42,
+          carbs: 53,
+          fat: 16,
+          localDate: '2026-03-03',
+          isManualEntry: true,
+        }),
+      },
+      env
+    )
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get('idempotency-key')).toBe('meal-created-1234')
+  })
+
+  it('retorna 409 + Retry-After quando requisição idempotente ainda está em processamento', async () => {
+    const app = createApp()
+    const payload = {
+      name: 'Arroz e frango',
+      mealType: 'lunch' as const,
+      calories: 540,
+      protein: 42,
+      carbs: 53,
+      fat: 16,
+      localDate: '2026-03-03',
+      isManualEntry: true,
+    }
+    const requestHash = await manualPayloadHash(payload)
+
+    const { env } = createEnv({
+      existingIdempotency: {
+        requestHash,
+        mealId: null,
+        state: 'in_progress',
+      },
+    })
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'meal-in-progress-1234',
+        },
+        body: JSON.stringify(payload),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    expect(response.status).toBe(409)
+    expect(body.code).toBe('IDEMPOTENCY_KEY_IN_PROGRESS')
+    expect(response.headers.get('retry-after')).toBe('2')
   })
 
   it('retorna 400 para base64 inválido e não tenta upload', async () => {

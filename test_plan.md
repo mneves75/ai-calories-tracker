@@ -1,5 +1,25 @@
 # Plano de Verificação (Executado)
 
+## Atualização elegante v2 (2026-03-03 23:57 UTC)
+
+### Critérios de aceite executados
+- Idempotência stateful com replay exato e TTL remoto aplicada.
+- Contrato de erro `problem+json` em fluxo de idempotência sem quebrar cliente mobile.
+- Gate autônomo multi-ciclo aprovado após migração remota `0007`.
+
+### Execuções realizadas
+1. `cd apps/api && bun run db:migrate:remote`
+   - `0007_idempotency_response_replay.sql` aplicada com sucesso.
+2. `bun run check-all`
+   - passou (lint + verify + build + smoke local).
+3. `CYCLES=2 bun run verify:autonomous`
+   - local: API `44/44`, Mobile `21/21`;
+   - produção: 2 ciclos consecutivos aprovados com stress auth + smoke completo;
+   - evidência: `.planning/evidence/verify-autonomous-20260303T235718Z.log`.
+
+### Resultado
+- Implementação v2 concluída e validada fim-a-fim.
+
 ## Fechamento autônomo final (2026-03-03 23:35 UTC)
 
 ### Critérios de aceite executados
