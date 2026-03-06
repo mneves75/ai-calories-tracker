@@ -2,7 +2,7 @@
   "expo": {
     "name": "ai-calories-tracker",
     "slug": "ai-calories-tracker",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "sdkVersion": "51.0.0",
     "platforms": [
       "ios",

@@ -16,8 +16,71 @@ type UserEnv = {
   }
 }
 
+type DailySummarySnapshot = {
+  totalCalories: number
+  totalProtein: number
+  totalCarbs: number
+  totalFat: number
+  mealsCount: number
+}
+
+const EMPTY_DAILY_SUMMARY: DailySummarySnapshot = {
+  totalCalories: 0,
+  totalProtein: 0,
+  totalCarbs: 0,
+  totalFat: 0,
+  mealsCount: 0,
+}
+
 const userRoutes = new Hono<UserEnv>()
 userRoutes.use('/*', authMiddleware)
+
+function activeUserProfileWhere(userId: string) {
+  return and(
+    eq(schema.userProfiles.userId, userId),
+    isNull(schema.userProfiles.deletedAt)
+  )
+}
+
+function toNumber(value: unknown) {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+async function getDailySummaryFromMeals(
+  d1: D1Database,
+  userId: string,
+  date: string
+): Promise<DailySummarySnapshot> {
+  const row = await d1.prepare(`
+    SELECT
+      COALESCE(SUM(calories), 0) AS totalCalories,
+      COALESCE(SUM(protein), 0) AS totalProtein,
+      COALESCE(SUM(carbs), 0) AS totalCarbs,
+      COALESCE(SUM(fat), 0) AS totalFat,
+      COUNT(*) AS mealsCount
+    FROM meals
+    WHERE user_id = ? AND local_date = ? AND deleted_at IS NULL
+  `).bind(userId, date).first<{
+    totalCalories: number | null
+    totalProtein: number | null
+    totalCarbs: number | null
+    totalFat: number | null
+    mealsCount: number | null
+  }>()
+
+  if (!row) {
+    return EMPTY_DAILY_SUMMARY
+  }
+
+  return {
+    totalCalories: toNumber(row.totalCalories),
+    totalProtein: toNumber(row.totalProtein),
+    totalCarbs: toNumber(row.totalCarbs),
+    totalFat: toNumber(row.totalFat),
+    mealsCount: toNumber(row.mealsCount),
+  }
+}
 
 // GET /users/me -- Get user profile
 userRoutes.get('/me', async (c) => {
@@ -26,7 +89,7 @@ userRoutes.get('/me', async (c) => {
 
   const [profile] = await db.select()
     .from(schema.userProfiles)
-    .where(eq(schema.userProfiles.userId, userId))
+    .where(activeUserProfileWhere(userId))
 
   return c.json({
     user: c.var.user,
@@ -119,29 +182,21 @@ userRoutes.get('/dashboard', queryValidator(dashboardQuerySchema), async (c) => 
 
   const [profile] = await db.select()
     .from(schema.userProfiles)
-    .where(eq(schema.userProfiles.userId, userId))
+    .where(activeUserProfileWhere(userId))
 
   let selectedDate = date
   if (!selectedDate) {
     const timezone = profile?.userTimezone
-    if (!timezone) {
+    const normalizedTimezone = timezone ? normalizeIanaTimezone(timezone) : null
+    if (!normalizedTimezone) {
       return c.json({
         error: 'Timezone do usuário não configurado',
         code: 'TIMEZONE_REQUIRED',
       }, 428)
     }
-    selectedDate = getDateForTimezone(timezone)
+    selectedDate = getDateForTimezone(normalizedTimezone)
   }
   const resolvedDate = selectedDate
-
-  const [summary] = await db.select()
-    .from(schema.dailySummaries)
-    .where(
-      and(
-        eq(schema.dailySummaries.userId, userId),
-        eq(schema.dailySummaries.date, resolvedDate)
-      )
-    )
 
   const meals = await db.select()
     .from(schema.meals)
@@ -152,11 +207,12 @@ userRoutes.get('/dashboard', queryValidator(dashboardQuerySchema), async (c) => 
         isNull(schema.meals.deletedAt)
       )
     )
+  const summary = await getDailySummaryFromMeals(c.env.DB, userId, resolvedDate)
 
   return c.json({
     date: resolvedDate,
     profile: profile ?? null,
-    summary: summary ?? { totalCalories: 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, mealsCount: 0 },
+    summary,
     meals,
     goals: profile ? {
       calories: profile.dailyCalorieGoal,
@@ -189,7 +245,7 @@ userRoutes.patch('/timezone', jsonValidator(timezoneSchema), async (c) => {
       timezoneUpdatedAt: new Date(),
       updatedAt: new Date(),
     })
-    .where(eq(schema.userProfiles.userId, userId))
+    .where(activeUserProfileWhere(userId))
     .returning()
 
   if (!profile) {

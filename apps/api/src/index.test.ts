@@ -141,6 +141,10 @@ describe('api app', () => {
     expect(response.headers.get('x-content-type-options')).toBe('nosniff')
     expect(response.headers.get('x-frame-options')).toBe('DENY')
     expect(response.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(response.headers.get('permissions-policy')).toBe('camera=(), microphone=(), geolocation=()')
+    expect(response.headers.get('cross-origin-opener-policy')).toBe('same-origin')
+    expect(response.headers.get('cross-origin-resource-policy')).toBe('same-origin')
+    expect(response.headers.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'none'")
   })
 
   it('retorna 503 em /health quando verificações internas falham', async () => {
@@ -226,5 +230,18 @@ describe('api app', () => {
 
     expect(response.status).toBe(404)
     expect(body.error).toBe('Rota não encontrada')
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(response.headers.get('content-security-policy')).toBe("default-src 'none'; frame-ancestors 'none'")
+  })
+
+  it('envia HSTS em produção', async () => {
+    const response = await app.fetch(
+      new Request('http://localhost/health'),
+      createEnv(undefined, { ENVIRONMENT: 'production' }),
+      {} as ExecutionContext
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('strict-transport-security')).toBe('max-age=31536000; includeSubDomains')
   })
 })

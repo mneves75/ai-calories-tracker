@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import type { Env } from '../types'
-import { runMediaGcCycle } from './media-gc'
+import { markMealMediaForDeletion, runMediaGcCycle } from './media-gc'
 
 type MediaStatus = 'uploaded' | 'attached' | 'pending_delete' | 'delete_failed' | 'deleted'
 
@@ -22,6 +22,7 @@ function createMockEnv(input: {
   activeMeals?: Record<string, string>
   withR2?: boolean
   threshold?: string
+  deleteErrorMessage?: string
 }) {
   const mediaRows = [...input.mediaRows]
   const activeMeals = input.activeMeals ?? {}
@@ -121,10 +122,11 @@ function createMockEnv(input: {
               return null as T
             },
             async run() {
-              if (normalized.includes("set status = 'attached'")) {
+              if (normalized.includes('update media_objects') && normalized.includes("status = 'attached'") && normalized.includes('meal_id = ?')) {
                 const id = String(params[params.length - 1])
                 const row = mediaRows.find((item) => item.id === id)
                 if (row) {
+                  row.mealId = String(params[0])
                   row.status = 'attached'
                   row.deleteAfter = null
                   row.updatedAt = Number(params[1] ?? Date.now())
@@ -167,6 +169,9 @@ function createMockEnv(input: {
     DB: db,
     R2: input.withR2 === false ? undefined : {
       async delete() {
+        if (input.deleteErrorMessage) {
+          throw new Error(input.deleteErrorMessage)
+        }
         deleteCalls += 1
       },
     } as unknown as R2Bucket,
@@ -182,6 +187,22 @@ function createMockEnv(input: {
     mediaRows,
     getDeleteCalls: () => deleteCalls,
   }
+}
+
+async function captureConsoleErrors(run: () => Promise<void> | void) {
+  const originalError = console.error
+  const calls: unknown[][] = []
+  console.error = (...args: unknown[]) => {
+    calls.push(args)
+  }
+
+  try {
+    await run()
+  } finally {
+    console.error = originalError
+  }
+
+  return calls
 }
 
 describe('media GC', () => {
@@ -236,5 +257,135 @@ describe('media GC', () => {
     expect(metrics.failed).toBe(1)
     expect(metrics.alert).toBe(true)
     expect(state.mediaRows[0]?.status).toBe('delete_failed')
+  })
+
+  it('reativa mídia para attached quando ainda existe refeição ativa', async () => {
+    const state = createMockEnv({
+      mediaRows: [{
+        id: 'media_3',
+        userId: 'user_1',
+        imageKey: 'user_1/2026-03-03/c.jpg',
+        mealId: null,
+        status: 'pending_delete',
+        deleteAfter: 1,
+        deletedAt: null,
+        attemptCount: 0,
+        lastError: null,
+        updatedAt: 1,
+      }],
+      activeMeals: {
+        'user_1/2026-03-03/c.jpg': 'meal_reattach_1',
+      },
+      withR2: true,
+    })
+
+    const metrics = await runMediaGcCycle(state.env, { now: 10, batchSize: 10 })
+
+    expect(metrics.deleted).toBe(0)
+    expect(metrics.failed).toBe(0)
+    expect(metrics.pending).toBe(0)
+    expect(state.getDeleteCalls()).toBe(0)
+    expect(state.mediaRows[0]?.status).toBe('attached')
+    expect(state.mediaRows[0]?.mealId).toBe('meal_reattach_1')
+  })
+
+  it('marca delete_failed quando R2.delete lança erro e registra mensagem', async () => {
+    const state = createMockEnv({
+      mediaRows: [{
+        id: 'media_4',
+        userId: 'user_1',
+        imageKey: 'user_1/2026-03-03/d.jpg',
+        mealId: null,
+        status: 'pending_delete',
+        deleteAfter: 1,
+        deletedAt: null,
+        attemptCount: 0,
+        lastError: null,
+        updatedAt: 1,
+      }],
+      withR2: true,
+      deleteErrorMessage: 'delete failed hard',
+      threshold: '1',
+    })
+
+    const metrics = await runMediaGcCycle(state.env, { now: 10, batchSize: 10 })
+
+    expect(metrics.failed).toBe(1)
+    expect(metrics.deleted).toBe(0)
+    expect(metrics.alert).toBe(true)
+    expect(state.mediaRows[0]?.status).toBe('delete_failed')
+    expect(state.mediaRows[0]?.lastError).toContain('delete failed hard')
+  })
+
+  it('recupera item delete_failed em ciclo subsequente com R2 disponível', async () => {
+    const state = createMockEnv({
+      mediaRows: [{
+        id: 'media_5',
+        userId: 'user_1',
+        imageKey: 'user_1/2026-03-03/e.jpg',
+        mealId: null,
+        status: 'delete_failed',
+        deleteAfter: 1,
+        deletedAt: null,
+        attemptCount: 2,
+        lastError: 'previous failure',
+        updatedAt: 1,
+      }],
+      withR2: true,
+    })
+
+    const metrics = await runMediaGcCycle(state.env, { now: 10, batchSize: 10 })
+
+    expect(metrics.failed).toBe(0)
+    expect(metrics.deleted).toBe(1)
+    expect(state.getDeleteCalls()).toBe(1)
+    expect(state.mediaRows[0]?.status).toBe('deleted')
+  })
+
+  it('aplica fallback de threshold e loga INVALID_ENV_VALUE para env inválida', async () => {
+    const state = createMockEnv({
+      mediaRows: [],
+      withR2: true,
+      threshold: '-4',
+    })
+
+    const logs = await captureConsoleErrors(async () => {
+      const metrics = await runMediaGcCycle(state.env, { now: 10, batchSize: 10 })
+      expect(metrics.alert).toBe(false)
+    })
+
+    const invalidEnvLog = logs.find((entry) => entry[0] === 'INVALID_ENV_VALUE')
+    expect(invalidEnvLog).toBeDefined()
+  })
+})
+
+describe('markMealMediaForDeletion', () => {
+  it('usa upsert no fallback quando update não encontra linha ativa', async () => {
+    const queries: string[] = []
+    let runCount = 0
+    const db = {
+      prepare(sql: string) {
+        return {
+          bind() {
+            queries.push(sql)
+            return {
+              async run() {
+                runCount += 1
+                if (runCount === 1) {
+                  return { success: true, meta: { changes: 0 } }
+                }
+                return { success: true, meta: { changes: 1 } }
+              },
+            }
+          },
+        }
+      },
+    } as unknown as D1Database
+
+    await markMealMediaForDeletion(db, 'user_1', 'user_1/2026-03-03/z.jpg', 'meal_9', 1000)
+
+    const insertQuery = queries.find((sql) => sql.toLowerCase().includes('insert into media_objects'))
+    expect(insertQuery).toBeDefined()
+    expect(insertQuery?.toLowerCase()).toContain('on conflict(image_key) do update')
   })
 })

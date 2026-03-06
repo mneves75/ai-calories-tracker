@@ -118,4 +118,73 @@ describe('meal write transport', () => {
     expect(capturedHeaders?.['Idempotency-Key']).toBe('op_123')
     expect(capturedBody?.analysisToken).toBe('analysis_123')
   })
+
+  it('preserva corpo problem+json em ApiError para mapear códigos fail-closed', async () => {
+    const originalFetch = global.fetch
+
+    global.fetch = (async (_input: RequestInfo | URL, _init?: RequestInit) => {
+      return new Response(
+        JSON.stringify({
+          type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
+          title: 'Idempotent request still in progress',
+          status: 409,
+          detail: 'Requisição idempotente em processamento. Tente novamente em instantes.',
+          code: 'IDEMPOTENCY_KEY_IN_PROGRESS',
+          error: 'Idempotent request still in progress',
+        }),
+        {
+          status: 409,
+          headers: { 'content-type': 'application/problem+json' },
+        }
+      )
+    }) as typeof fetch
+
+    try {
+      await expect(
+        createMealFromAnalysis('token_1', {
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 500,
+          protein: 40,
+          carbs: 50,
+          fat: 15,
+          localDate: '2026-03-03',
+          operationId: 'op_problem_json_1',
+        })
+      ).rejects.toMatchObject({
+        status: 409,
+        body: { code: 'IDEMPOTENCY_KEY_IN_PROGRESS' },
+      })
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it('mapeia AbortError para timeout amigável', async () => {
+    const originalFetch = global.fetch
+
+    global.fetch = (async () => {
+      throw Object.assign(new Error('aborted'), { name: 'AbortError' })
+    }) as typeof fetch
+
+    try {
+      await expect(
+        createMealFromAnalysis('token_1', {
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 500,
+          protein: 40,
+          carbs: 50,
+          fat: 15,
+          localDate: '2026-03-03',
+          operationId: 'op_abort_1',
+        })
+      ).rejects.toMatchObject({
+        status: 0,
+        message: 'Tempo limite de conexão atingido. Tente novamente.',
+      })
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
 })

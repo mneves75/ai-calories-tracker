@@ -266,6 +266,7 @@ async function manualPayloadHash(input: {
   fat: number
   localDate: string
   imageKey?: string
+  analysisToken?: string
   foodsDetected?: Array<{ name: string; portion: string; calories: number; protein: number; carbs: number; fat: number }>
   aiConfidence?: 'high' | 'medium' | 'low'
   isManualEntry?: boolean
@@ -280,7 +281,7 @@ async function manualPayloadHash(input: {
     fat: input.fat,
     localDate: input.localDate,
     imageKey: input.imageKey ?? null,
-    analysisToken: null,
+    analysisToken: input.analysisToken ?? null,
     foodsDetected: input.foodsDetected ?? [],
     aiConfidence: input.aiConfidence ?? null,
     isManualEntry: input.isManualEntry ?? true,
@@ -374,6 +375,34 @@ describe('mealRoutes regressions', () => {
     expect(response.status).toBe(428)
   })
 
+  it('retorna 428 quando localDate ausente e timezone persistido é inválido', async () => {
+    const app = createApp()
+    const { env, logs } = createEnv({
+      analysisCount: 0,
+      userTimezone: 'Invalid/Timezone',
+    })
+
+    const response = await app.request(
+      'http://localhost/api/meals/analyze',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: 'data:image/jpeg;base64,' + btoa('x'.repeat(300)),
+          mealType: 'lunch',
+        }),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    const insertLog = logs.find((entry) => entry.sql.toLowerCase().includes('insert into analysis_events'))
+
+    expect(response.status).toBe(428)
+    expect(body.code).toBe('TIMEZONE_REQUIRED')
+    expect(insertLog).toBeUndefined()
+  })
+
   it('exige Idempotency-Key no POST /manual', async () => {
     const app = createApp()
     const { env } = createEnv()
@@ -439,7 +468,7 @@ describe('mealRoutes regressions', () => {
     expect(body.code).toBe('IDEMPOTENCY_KEY_CONFLICT')
   })
 
-  it('retorna replay com mesmo status/body quando Idempotency-Key e payload já foram processados', async () => {
+  it('retorna replay com status/body persistidos sem normalização quando Idempotency-Key já foi processada', async () => {
     const app = createApp()
     const payload = {
       name: 'Arroz e frango',
@@ -453,33 +482,37 @@ describe('mealRoutes regressions', () => {
     }
     const requestHash = await manualPayloadHash(payload)
     const replayMealId = 'meal_replay_1'
+    const replayBody = JSON.stringify({
+      meal: {
+        id: replayMealId,
+        userId: TEST_USER.id,
+        imageKey: null,
+        mealType: payload.mealType,
+        name: payload.name,
+        calories: payload.calories,
+        protein: payload.protein,
+        carbs: payload.carbs,
+        fat: payload.fat,
+        foodsDetected: null,
+        aiConfidence: null,
+        isManualEntry: true,
+        localDate: payload.localDate,
+        loggedAt: '2026-03-03T12:00:00.000Z',
+        createdAt: Date.now(),
+        deletedAt: null,
+      },
+      replayMeta: {
+        source: 'stored',
+      },
+    })
 
     const { env, logs } = createEnv({
       existingIdempotency: {
         requestHash,
         mealId: replayMealId,
         state: 'completed',
-        responseStatus: 201,
-        responseBody: JSON.stringify({
-          meal: {
-            id: replayMealId,
-            userId: TEST_USER.id,
-            imageKey: null,
-            mealType: payload.mealType,
-            name: payload.name,
-            calories: payload.calories,
-            protein: payload.protein,
-            carbs: payload.carbs,
-            fat: payload.fat,
-            foodsDetected: null,
-            aiConfidence: null,
-            isManualEntry: true,
-            localDate: payload.localDate,
-            loggedAt: '2026-03-03T12:00:00.000Z',
-            createdAt: Date.now(),
-            deletedAt: null,
-          },
-        }),
+        responseStatus: 202,
+        responseBody: replayBody,
       },
     })
 
@@ -496,18 +529,126 @@ describe('mealRoutes regressions', () => {
       env
     )
 
-    const body = await response.json() as { meal: { id: string } }
+    const bodyText = await response.text()
+    const body = JSON.parse(bodyText) as { meal: { id: string }; replayMeta: { source: string } }
     const insertMealLog = logs.find((entry) => entry.sql.toLowerCase().includes('insert into meals'))
 
-    expect(response.status).toBe(201)
+    expect(response.status).toBe(202)
+    expect(bodyText).toBe(replayBody)
     expect(body.meal.id).toBe(replayMealId)
+    expect(body.replayMeta.source).toBe('stored')
     expect(response.headers.get('idempotency-replayed')).toBe('true')
     expect(insertMealLog).toBeUndefined()
   })
 
+  it('retorna 409 stale quando registro idempotente completed não possui replay persistido', async () => {
+    const app = createApp()
+    const payload = {
+      name: 'Arroz e frango',
+      mealType: 'lunch' as const,
+      calories: 540,
+      protein: 42,
+      carbs: 53,
+      fat: 16,
+      localDate: '2026-03-03',
+      isManualEntry: true,
+    }
+    const requestHash = await manualPayloadHash(payload)
+
+    const { env } = createEnv({
+      existingIdempotency: {
+        requestHash,
+        mealId: 'meal_old_1',
+        state: 'completed',
+        responseStatus: null,
+        responseBody: null,
+      },
+    })
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'meal-stale-1234',
+        },
+        body: JSON.stringify(payload),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    expect(response.status).toBe(409)
+    expect(body.code).toBe('IDEMPOTENCY_KEY_STALE')
+  })
+
+  it('reproduz replay idempotente para payload com mídia mesmo quando token já está attached', async () => {
+    const app = createApp()
+    const payload = {
+      name: 'Arroz e frango',
+      mealType: 'lunch' as const,
+      calories: 540,
+      protein: 42,
+      carbs: 53,
+      fat: 16,
+      localDate: '2026-03-03',
+      imageKey: 'user_1/2026-03-03/image.jpg',
+      analysisToken: 'media_attached_1',
+      isManualEntry: true,
+    }
+    const requestHash = await manualPayloadHash(payload)
+    const replayMealId = 'meal_replay_media_1'
+    const replayBody = JSON.stringify({
+      meal: {
+        id: replayMealId,
+      },
+    })
+
+    const { env, logs } = createEnv({
+      existingIdempotency: {
+        requestHash,
+        mealId: replayMealId,
+        state: 'completed',
+        responseStatus: 201,
+        responseBody: replayBody,
+      },
+      existingMediaObject: {
+        id: 'media_attached_1',
+        userId: TEST_USER.id,
+        imageKey: payload.imageKey,
+        mealId: 'meal_existente',
+        status: 'attached',
+        deleteAfter: null,
+        attemptCount: 1,
+      },
+    })
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'meal-media-replay-1234',
+        },
+        body: JSON.stringify(payload),
+      },
+      env
+    )
+
+    const replayText = await response.text()
+    const mediaQueryLog = logs.find((entry) => entry.sql.toLowerCase().includes('from media_objects'))
+
+    expect(response.status).toBe(201)
+    expect(response.headers.get('idempotency-replayed')).toBe('true')
+    expect(replayText).toBe(replayBody)
+    expect(mediaQueryLog).toBeUndefined()
+  })
+
   it('retorna 201 e ecoa Idempotency-Key em criação manual bem-sucedida', async () => {
     const app = createApp()
-    const { env } = createEnv()
+    const { env, logs } = createEnv()
 
     const response = await app.request(
       'http://localhost/api/meals/manual',
@@ -533,6 +674,13 @@ describe('mealRoutes regressions', () => {
 
     expect(response.status).toBe(201)
     expect(response.headers.get('idempotency-key')).toBe('meal-created-1234')
+    const reservationInsert = logs.find((entry) => entry.sql.toLowerCase().includes('insert into meal_idempotency_keys'))
+    expect(reservationInsert).toBeDefined()
+    const createdAt = Number(reservationInsert?.params[5])
+    const expiresAt = Number(reservationInsert?.params[7])
+    expect(Number.isFinite(createdAt)).toBe(true)
+    expect(Number.isFinite(expiresAt)).toBe(true)
+    expect(expiresAt - createdAt).toBe(24 * 60 * 60 * 1000)
   })
 
   it('retorna 409 + Retry-After quando requisição idempotente ainda está em processamento', async () => {
@@ -854,6 +1002,149 @@ describe('mealRoutes regressions', () => {
     const body = await response.json() as { code: string }
     expect(response.status).toBe(400)
     expect(body.code).toBe('MEDIA_TOKEN_REQUIRED')
+  })
+
+  it('rejeita analysisToken sem imageKey no POST /manual', async () => {
+    const app = createApp()
+    const { env } = createEnv()
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'manual-media-5678' },
+        body: JSON.stringify({
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 540,
+          protein: 42,
+          carbs: 53,
+          fat: 16,
+          localDate: '2026-03-03',
+          analysisToken: 'analysis_123',
+        }),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    expect(response.status).toBe(400)
+    expect(body.code).toBe('MEDIA_TOKEN_INVALID')
+  })
+
+  it('rejeita token de mídia já anexado para evitar replay', async () => {
+    const app = createApp()
+    const { env } = createEnv({
+      existingMediaObject: {
+        id: 'media_attached_1',
+        userId: TEST_USER.id,
+        imageKey: 'user_1/2026-03-03/image.jpg',
+        mealId: 'meal_existente',
+        status: 'attached',
+        deleteAfter: null,
+        attemptCount: 0,
+      },
+    })
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'idempotency-key': 'manual-media-9012' },
+        body: JSON.stringify({
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 540,
+          protein: 42,
+          carbs: 53,
+          fat: 16,
+          localDate: '2026-03-03',
+          imageKey: 'user_1/2026-03-03/image.jpg',
+          analysisToken: 'media_attached_1',
+        }),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    expect(response.status).toBe(409)
+    expect(body.code).toBe('MEDIA_NOT_AVAILABLE')
+  })
+
+  it('retorna 503 quando GEMINI_API_KEY não está configurada', async () => {
+    const app = createApp()
+    const { env } = createEnv({ analysisCount: 0 })
+    env.GEMINI_API_KEY = undefined
+
+    const response = await app.request(
+      'http://localhost/api/meals/analyze',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(analyzeBody()),
+      },
+      env
+    )
+
+    expect(response.status).toBe(503)
+  })
+
+  it('mantém /analyze disponível quando R2 não está disponível (sem imageKey)', async () => {
+    const app = createApp()
+    const { env } = createEnv({ analysisCount: 0 })
+    env.R2 = undefined
+
+    const response = await app.request(
+      'http://localhost/api/meals/analyze',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(analyzeBody()),
+      },
+      env
+    )
+
+    const body = await response.json() as {
+      analysis: {
+        imageKey: string | null
+        analysisToken: string
+      }
+    }
+    expect(response.status).toBe(200)
+    expect(body.analysis.imageKey).toBeNull()
+    expect(body.analysis.analysisToken).toBe('')
+  })
+
+  it('retorna 409 + Retry-After quando reserva idempotente não consegue gravar estado inicial', async () => {
+    const app = createApp()
+    const { env } = createEnv({ idempotencyInsertChanges: 0 })
+
+    const response = await app.request(
+      'http://localhost/api/meals/manual',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'idempotency-key': 'meal-reservation-failed-1234',
+        },
+        body: JSON.stringify({
+          name: 'Arroz e frango',
+          mealType: 'lunch',
+          calories: 540,
+          protein: 42,
+          carbs: 53,
+          fat: 16,
+          localDate: '2026-03-03',
+          isManualEntry: true,
+        }),
+      },
+      env
+    )
+
+    const body = await response.json() as { code: string }
+    expect(response.status).toBe(409)
+    expect(response.headers.get('retry-after')).toBe('2')
+    expect(body.code).toBe('IDEMPOTENCY_KEY_RESERVATION_FAILED')
   })
 
   it('retorna 404 ao deletar refeição inexistente', async () => {

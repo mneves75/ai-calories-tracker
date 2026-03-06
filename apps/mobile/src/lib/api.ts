@@ -329,7 +329,7 @@ async function request<T>(path: string, options: RequestOptions = {}) {
   const text = await response.text()
   let parsed: unknown = null
 
-  if (text.length > 0 && contentType.includes('application/json')) {
+  if (text.length > 0 && contentType.toLowerCase().includes('json')) {
     try {
       parsed = JSON.parse(text)
     } catch {

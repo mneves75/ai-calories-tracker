@@ -5,6 +5,9 @@ ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_DIR="$ROOT_DIR/apps/mobile"
 SIM_DEVICE="${SIM_DEVICE:-iPhone 16}"
 SKIP_APP_RUN="${SKIP_APP_RUN:-0}"
+METRO_PORT="${METRO_PORT:-8081}"
+AUTO_KILL_FOREIGN_METRO="${AUTO_KILL_FOREIGN_METRO:-1}"
+LOCAL_METRO_RUNNING=0
 
 log() {
   printf '[init] %s\n' "$1"
@@ -23,8 +26,39 @@ require_cmd bun
 require_cmd node
 require_cmd open
 require_cmd xcrun
+require_cmd lsof
+require_cmd ps
 
 [ -d "$APP_DIR" ] || fail "diretório do app não encontrado: $APP_DIR"
+
+ensure_metro_port_owner() {
+  local pids
+  pids="$(lsof -nP -iTCP:"$METRO_PORT" -sTCP:LISTEN -t 2>/dev/null | sort -u || true)"
+  [ -z "$pids" ] && return 0
+
+  for pid in $pids; do
+    local cmd cwd
+    cmd="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' | head -n1)"
+
+    if [[ "$cmd" == *"expo start"* || "$cmd" == *"expo run"* || "$cmd" == *"react-native start"* ]]; then
+      if [[ -n "$cwd" && "$cwd" == "$ROOT_DIR"* ]]; then
+        log "porta $METRO_PORT já em uso por processo do projeto atual (pid=$pid), mantendo."
+        LOCAL_METRO_RUNNING=1
+        continue
+      fi
+
+      if [ "$AUTO_KILL_FOREIGN_METRO" = "1" ]; then
+        log "encerrando Metro/Expo externo em $METRO_PORT (pid=$pid) para evitar conexão em projeto errado."
+        kill "$pid" >/dev/null 2>&1 || true
+      else
+        fail "porta $METRO_PORT ocupada por processo Expo/Metro externo (pid=$pid). Use AUTO_KILL_FOREIGN_METRO=1."
+      fi
+    else
+      fail "porta $METRO_PORT ocupada por processo não-Expo (pid=$pid). Libere a porta e tente novamente."
+    fi
+  done
+}
 
 log "abrindo iOS Simulator..."
 open -a Simulator
@@ -82,6 +116,13 @@ if [ "$SKIP_APP_RUN" = "1" ]; then
   exit 0
 fi
 
+ensure_metro_port_owner
+
 log "iniciando app no simulador..."
 cd "$APP_DIR"
-bun run ios
+if [ "$LOCAL_METRO_RUNNING" = "1" ]; then
+  log "Metro do projeto já está ativo em $METRO_PORT; executando com --no-bundler."
+  EXPO_DEV_SERVER_PORT="$METRO_PORT" bunx expo run:ios --no-bundler
+else
+  EXPO_DEV_SERVER_PORT="$METRO_PORT" bunx expo run:ios --port "$METRO_PORT"
+fi

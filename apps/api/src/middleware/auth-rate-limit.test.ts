@@ -105,6 +105,22 @@ describe('authRateLimit', () => {
     expect(response.status).toBe(200)
   })
 
+  it('aplica limiter também no sign-up com chave dedicada', async () => {
+    const app = createApp()
+    const state = createEnv(0, 'test')
+
+    const response = await app.request('http://localhost/api/auth/sign-up/email', {
+      method: 'POST',
+      headers: {
+        'x-forwarded-for': '198.51.100.44',
+      },
+    }, state.env)
+
+    expect(response.status).toBe(200)
+    const insertLog = state.logs.find((entry) => entry.sql.toLowerCase().includes('insert into auth_rate_limits'))
+    expect(insertLog?.params[1]).toBe('signup:198.51.100.44')
+  })
+
   it('ignora x-forwarded-for em produção quando cf-connecting-ip não existe', async () => {
     const app = createApp()
     const state = createEnv(0, 'production')
