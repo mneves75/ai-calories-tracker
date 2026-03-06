@@ -105,7 +105,12 @@ export async function validateUploadedMediaOwnership(
     }
   }
 
-  if (media.status === 'deleted' || media.status === 'pending_delete' || media.status === 'delete_failed') {
+  if (
+    media.status === 'attached'
+    || media.status === 'deleted'
+    || media.status === 'pending_delete'
+    || media.status === 'delete_failed'
+  ) {
     return {
       ok: false as const,
       status: 409 as const,
@@ -140,7 +145,7 @@ export async function attachMediaToMeal(
       delete_after = NULL,
       updated_at = ?,
       last_error = NULL
-    WHERE id = ? AND user_id = ? AND image_key = ? AND deleted_at IS NULL
+    WHERE id = ? AND user_id = ? AND image_key = ? AND status = 'uploaded' AND deleted_at IS NULL
   `).bind(mealId, updatedAt, updatedAt, analysisToken, userId, imageKey).run()
 
   return Number(result.meta?.changes ?? 0) > 0
@@ -180,8 +185,17 @@ export async function markMealMediaForDeletion(
       attached_at,
       delete_after,
       attempt_count,
-      updated_at
-    ) VALUES (?, ?, ?, ?, 'pending_delete', ?, ?, ?, 0, ?)
+      updated_at,
+      last_error
+    ) VALUES (?, ?, ?, ?, 'pending_delete', ?, ?, ?, 0, ?, NULL)
+    ON CONFLICT(image_key) DO UPDATE SET
+      user_id = excluded.user_id,
+      meal_id = excluded.meal_id,
+      status = 'pending_delete',
+      delete_after = excluded.delete_after,
+      updated_at = excluded.updated_at,
+      deleted_at = NULL,
+      last_error = NULL
   `).bind(
     crypto.randomUUID(),
     userId,

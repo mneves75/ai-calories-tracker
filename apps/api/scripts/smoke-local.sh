@@ -8,6 +8,7 @@ BASE_URL="http://127.0.0.1:${PORT}"
 DEV_LOG="$TMP_DIR/wrangler-dev.log"
 DEV_PID=""
 TEMP_DEV_VARS_CREATED=0
+SMOKE_TIMEZONE="${SMOKE_TIMEZONE:-America/Sao_Paulo}"
 
 cleanup() {
   if [ -n "$DEV_PID" ] && kill -0 "$DEV_PID" >/dev/null 2>&1; then
@@ -112,19 +113,29 @@ wait_for_server
 log "executando smoke ponta a ponta local"
 email="smoke.local.$(date +%s)@example.com"
 password='Smoke123!'
-today="$(date -u +%Y-%m-%d)"
+today="$(node "$ROOT_DIR/scripts/local-date-by-timezone.mjs" "$SMOKE_TIMEZONE")"
 
 signup_body="$TMP_DIR/signup.json"
 signup_code="$(http_code POST "$BASE_URL/api/auth/sign-up/email" "$signup_body" "{\"email\":\"$email\",\"password\":\"$password\",\"name\":\"Smoke Local\"}")"
 [ "$signup_code" = "200" ] || fail "sign-up falhou ($signup_code). body=$(cat "$signup_body")"
+
+me_unauth_body="$TMP_DIR/me-unauth.json"
+me_unauth_code="$(http_code GET "$BASE_URL/api/users/me" "$me_unauth_body")"
+[ "$me_unauth_code" = "401" ] || fail "/api/users/me sem auth deveria retornar 401 ($me_unauth_code). body=$(cat "$me_unauth_body")"
 
 token="$(json_get "$signup_body" "data.token || data.data?.token")"
 [ -n "$token" ] || fail "token ausente no sign-up"
 
 auth_header="authorization: Bearer $token"
 
+onboarding_invalid_body="$TMP_DIR/onboarding-invalid.json"
+onboarding_invalid_code="$(http_code POST "$BASE_URL/api/users/onboarding" "$onboarding_invalid_body" "{\"sex\":\"male\",\"birthDate\":\"1992-06-10\",\"heightCm\":178,\"weightKg\":82,\"activityLevel\":\"moderate\",\"goalType\":\"maintain\",\"timezone\":\"Invalid/Timezone\"}" "$auth_header")"
+[ "$onboarding_invalid_code" = "400" ] || fail "onboarding inválido deveria retornar 400 ($onboarding_invalid_code). body=$(cat "$onboarding_invalid_body")"
+onboarding_invalid_reason="$(json_get "$onboarding_invalid_body" "data.code")"
+[ "$onboarding_invalid_reason" = "TIMEZONE_INVALID" ] || fail "onboarding inválido deveria retornar TIMEZONE_INVALID, recebido=$onboarding_invalid_reason"
+
 onboarding_body="$TMP_DIR/onboarding.json"
-onboarding_code="$(http_code POST "$BASE_URL/api/users/onboarding" "$onboarding_body" "{\"sex\":\"male\",\"birthDate\":\"1992-06-10\",\"heightCm\":178,\"weightKg\":82,\"activityLevel\":\"moderate\",\"goalType\":\"maintain\",\"timezone\":\"America/Sao_Paulo\"}" "$auth_header")"
+onboarding_code="$(http_code POST "$BASE_URL/api/users/onboarding" "$onboarding_body" "{\"sex\":\"male\",\"birthDate\":\"1992-06-10\",\"heightCm\":178,\"weightKg\":82,\"activityLevel\":\"moderate\",\"goalType\":\"maintain\",\"timezone\":\"$SMOKE_TIMEZONE\"}" "$auth_header")"
 [ "$onboarding_code" = "200" ] || fail "onboarding falhou ($onboarding_code). body=$(cat "$onboarding_body")"
 
 manual_body="$TMP_DIR/manual.json"

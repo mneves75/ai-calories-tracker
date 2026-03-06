@@ -1,9 +1,42 @@
-export function isValidIanaTimezone(value: string) {
+const supportedTimezones = (() => {
   try {
-    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(new Date())
-    return true
+    if (typeof Intl.supportedValuesOf === 'function') {
+      const values = Intl.supportedValuesOf('timeZone')
+      if (Array.isArray(values) && values.length > 0) {
+        return new Set(values)
+      }
+    }
+  } catch {
+    // ignore runtime differences and fallback to DateTimeFormat validation
+  }
+
+  return null
+})()
+
+export function isValidIanaTimezone(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return false
+  }
+
+  if (supportedTimezones) {
+    return supportedTimezones.has(trimmed)
+  }
+
+  try {
+    const resolved = new Intl.DateTimeFormat('en-US', { timeZone: trimmed }).resolvedOptions().timeZone
+    return resolved === trimmed
   } catch {
     return false
+  }
+}
+
+function canonicalizeIanaTimezone(value: string) {
+  try {
+    const resolved = new Intl.DateTimeFormat('en-US', { timeZone: value }).resolvedOptions().timeZone
+    return resolved || value
+  } catch {
+    return value
   }
 }
 
@@ -17,7 +50,15 @@ export function normalizeIanaTimezone(value: string | null | undefined) {
     return null
   }
 
-  return trimmed
+  if (supportedTimezones) {
+    return trimmed
+  }
+
+  try {
+    return canonicalizeIanaTimezone(trimmed)
+  } catch {
+    return trimmed
+  }
 }
 
 export function getDateForTimezone(timeZone: string, now: Date = new Date()) {

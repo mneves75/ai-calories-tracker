@@ -6,7 +6,7 @@ import { drizzle } from 'drizzle-orm/d1'
 import { authMiddleware } from '../middleware/auth'
 import { jsonValidator, queryValidator, paramValidator } from '../middleware/validate'
 import { analyzeFood } from '../services/gemini'
-import { getDateForTimezone } from '../lib/timezone'
+import { getDateForTimezone, normalizeIanaTimezone } from '../lib/timezone'
 import { problem } from '../lib/problem'
 import {
   attachMediaToMeal,
@@ -306,6 +306,10 @@ function mapMealSelectRow(row: MealSelectRow) {
   }
 }
 
+function isValidStoredReplayStatus(status: number | null | undefined): status is number {
+  return typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599
+}
+
 async function findMealById(d1: D1Database, userId: string, mealId: string) {
   const meal = await d1.prepare(`
     SELECT
@@ -393,23 +397,8 @@ async function resolveManualIdempotency(
     })
   }
 
-  if (existing.responseStatus && existing.responseBody) {
-    let parsedBody: unknown
-    try {
-      parsedBody = JSON.parse(existing.responseBody)
-    } catch {
-      parsedBody = null
-    }
-
-    if (parsedBody !== null) {
-      const replayStatus: 200 | 201 = existing.responseStatus === 200 ? 200 : 201
-      c.header('Idempotency-Key', idempotencyKey)
-      c.header(IDEMPOTENCY_REPLAYED_HEADER, 'true')
-      return c.json(parsedBody, replayStatus)
-    }
-  }
-
-  if (!existing.mealId) {
+  const replayStatus = existing.responseStatus
+  if (!isValidStoredReplayStatus(replayStatus) || !existing.responseBody) {
     return problem(c, {
       type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
       title: 'Idempotency record is inconsistent',
@@ -419,20 +408,14 @@ async function resolveManualIdempotency(
     })
   }
 
-  const meal = await findMealById(c.env.DB, userId, existing.mealId)
-  if (!meal) {
-    return problem(c, {
-      type: 'https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header',
-      title: 'Idempotency record is stale',
-      status: 409,
-      detail: 'Requisição idempotente inconsistente. Reenvie com uma nova chave.',
-      code: 'IDEMPOTENCY_KEY_STALE',
-    })
-  }
-
-  c.header('Idempotency-Key', idempotencyKey)
-  c.header(IDEMPOTENCY_REPLAYED_HEADER, 'true')
-  return c.json({ meal }, 201)
+  const headers = new Headers()
+  headers.set('content-type', 'application/json; charset=utf-8')
+  headers.set('Idempotency-Key', idempotencyKey)
+  headers.set(IDEMPOTENCY_REPLAYED_HEADER, 'true')
+  return new Response(existing.responseBody, {
+    status: replayStatus,
+    headers,
+  })
 }
 
 // All routes require auth
@@ -449,10 +432,15 @@ mealRoutes.post('/analyze', analyzeContentLengthGuard, jsonValidator(analyzeSche
   const { imageBase64, mealType, localDate } = c.req.valid('json')
   const userId = c.var.user.id
   const userTimezone = await getUserTimezone(c.env.DB, userId)
-  const effectiveLocalDate = localDate ?? (userTimezone ? getDateForTimezone(userTimezone) : null)
   let reservedAnalysisEventId: string | null = null
+  let effectiveLocalDate: string | null = localDate ?? null
 
   try {
+    if (!effectiveLocalDate) {
+      const normalizedTimezone = normalizeIanaTimezone(userTimezone)
+      effectiveLocalDate = normalizedTimezone ? getDateForTimezone(normalizedTimezone) : null
+    }
+
     if (!effectiveLocalDate) {
       return c.json({
         error: 'Timezone do usuário não configurado',
@@ -462,13 +450,6 @@ mealRoutes.post('/analyze', analyzeContentLengthGuard, jsonValidator(analyzeSche
 
     if (!c.env.GEMINI_API_KEY) {
       return c.json({ error: 'Serviço de análise indisponível no momento' }, 503)
-    }
-
-    if (!c.env.R2) {
-      return c.json({
-        error: 'Serviço de mídia indisponível no momento',
-        code: 'MEDIA_STORAGE_UNAVAILABLE',
-      }, 503)
     }
 
     const { normalizedBase64, binaryImage } = parseAnalyzeImageBase64(imageBase64)
@@ -517,15 +498,24 @@ mealRoutes.post('/analyze', analyzeContentLengthGuard, jsonValidator(analyzeSche
       }, 422)
     }
 
-    // Upload to R2 and register upload ownership token.
-    const imageKey = `${userId}/${effectiveLocalDate}/${crypto.randomUUID()}.jpg`
-    await c.env.R2.put(imageKey, binaryImage)
+    let imageKey: string | null = null
     let analysisToken = ''
-    try {
-      analysisToken = await registerUploadedMedia(c.env.DB, userId, imageKey)
-    } catch (error) {
-      await c.env.R2.delete(imageKey)
-      throw error
+    if (c.env.R2) {
+      // Upload to R2 and register upload ownership token.
+      imageKey = `${userId}/${effectiveLocalDate}/${crypto.randomUUID()}.jpg`
+      await c.env.R2.put(imageKey, binaryImage)
+      try {
+        analysisToken = await registerUploadedMedia(c.env.DB, userId, imageKey)
+      } catch (error) {
+        await c.env.R2.delete(imageKey)
+        throw error
+      }
+    } else {
+      // Keep analyze available even when media storage is temporarily unavailable.
+      console.error('MEDIA_STORAGE_DEGRADED', {
+        userId,
+        localDate: effectiveLocalDate,
+      })
     }
 
     return c.json({
@@ -606,13 +596,6 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
     )
   }
 
-  if (data.imageKey && data.analysisToken) {
-    const mediaValidation = await validateUploadedMediaOwnership(c.env.DB, userId, data.analysisToken, data.imageKey)
-    if (!mediaValidation.ok) {
-      return c.json(mediaValidation.body, mediaValidation.status)
-    }
-  }
-
   const idempotencyKey = normalizeIdempotencyKey(c.req.header(IDEMPOTENCY_KEY_HEADER))
   if (!idempotencyKey) {
     return problem(c, {
@@ -628,6 +611,13 @@ mealRoutes.post('/manual', jsonValidator(manualSchema), async (c) => {
   const existingResponse = await resolveManualIdempotency(c, userId, idempotencyKey, requestHash)
   if (existingResponse) {
     return existingResponse
+  }
+
+  if (data.imageKey && data.analysisToken) {
+    const mediaValidation = await validateUploadedMediaOwnership(c.env.DB, userId, data.analysisToken, data.imageKey)
+    if (!mediaValidation.ok) {
+      return c.json(mediaValidation.body, mediaValidation.status)
+    }
   }
 
   const reservation = await c.env.DB.prepare(`

@@ -13,6 +13,7 @@
     "api:verify:production": "cd apps/api && bun run verify:production",
     "api:verify:production:loop": "cd apps/api && bun run verify:production:loop",
     "mobile:start": "cd apps/mobile && bun run start",
+    "mobile:doctor": "cd apps/mobile && bun run doctor",
     "mobile:lint": "cd apps/mobile && bun run lint",
     "mobile:build": "cd apps/mobile && bun run build",
     "mobile:verify": "cd apps/mobile && bun run verify",
@@ -20,7 +21,7 @@
     "verify": "bun run api:verify && bun run mobile:verify",
     "build": "bun run api:build && bun run mobile:build",
     "smoke:local": "bun run api:smoke:local",
-    "check-all": "bun run lint && bun run verify && bun run build && bun run smoke:local",
+    "check-all": "bun run lint && bun run verify && bun run mobile:doctor && bun run build && bun run smoke:local",
     "verify:autonomous": "bash ./scripts/verify-autonomous.sh"
   }
 }
